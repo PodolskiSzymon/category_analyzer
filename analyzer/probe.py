@@ -192,6 +192,17 @@ def show(probe_dir=None):
                       f"pozycji spoza zakresu {len(outside)}; przykłady (price | total_item_price):"]
         lines += [f"    {p} | {t}" for _, p, t in sorted(set(outside))[:15]]
 
+    for path in sorted(probe_dir.glob("04_sidebar_*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        body = data.get("body") or {}
+        from sniper.extractor import get_plugin, unwrap_sidebar
+        from .details import attributes
+        sidebar = unwrap_sidebar(body)
+        lines += ["", f"[D] {path.name}: HTTP {data.get('_status')}, pluginy: "
+                      f"{[p.get('name') for p in sidebar.get('plugins') or []]}",
+                  f"    atrybuty: {json.dumps(attributes(sidebar), ensure_ascii=False)}",
+                  f"    opis: {(get_plugin(sidebar, 'description').get('description') or '')[:1500]}"]
+
     text = "\n".join(lines)
     print(text)
     (probe_dir / "show.txt").write_text(text + "\n", encoding="utf-8")

@@ -111,7 +111,23 @@ SCHEMA_V3 = """
 ALTER TABLE listings ADD COLUMN model TEXT;
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3]
+# v4: szczegóły oferty (details/sidebar, raz na ofertę) - opis do ekstrakcji parametrów, atrybuty, „Dodane”.
+SCHEMA_V4 = """
+CREATE TABLE details (
+  listing_id      INTEGER PRIMARY KEY,
+  fetched_at      TEXT NOT NULL,
+  description     TEXT,
+  attributes_json TEXT,                     -- {code: value} z pluginu attributes
+  upload_age      TEXT,                     -- surowe „Dodane” („3 mies.”)
+  created_est     TEXT,                     -- fetched_at - upload_age (przybliżenie)
+  business        INTEGER,                  -- sprzedawca firma (NULL = brak danych)
+  seller_currency TEXT,                     -- waluta sprzedawcy (≠ PLN = oferta zagraniczna)
+  photo_count     INTEGER,
+  is_localized    INTEGER                   -- opis tłumaczony przez Vinted
+);
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4]
 
 
 def utcnow():

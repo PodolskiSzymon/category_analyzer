@@ -57,7 +57,7 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `total_entries` → za duża partycja dzielona; bez `total_entries` – przepełnienie = pełna ostatnia dozwolona strona;
   wznawianie przerwanego przejścia; 429 → przerwa), `diff.py` (migawka: `missed_runs`, `gone_pending`; oferty
   w partycjach oversize pomijane), `probe.py` (etap 0), CLI `probe | crawl | status`.
-* **Testy**: `analyzer/tests` – 25 testów (w tym kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
+* **Testy**: `analyzer/tests` – 30 testów (w tym details, cena minimalna, kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
   `pagination`, z `price_to` włącznie i wyłącznie, ponowne przejście (zmiana ceny, rezerwacja, zniknięcie →
   `gone_pending` po 2 przejściach, powrót), cena z liczbą ofert > limit (oversize), wznawianie po błędach.
   Atrapa 50 tys. ofert: wszystkie zebrane, 653 zapytania (minimum 521), drugie przejście 575.
@@ -98,8 +98,19 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   partycja [nowy próg, najniższa]). Oferty z ostatnią ceną < progu → stan `below_min` (nie idą do resolvera);
   resolver: aktywna, ale potaniała poniżej progu → `below_min`; oferta znów ≥ progu w katalogu → `active`.
 * **Tryb `watch`** (`python -m analyzer watch`): bez końca crawl + resolve, przerwa `ANALYZER_WATCH_HOURS` (10–14 h).
-* **Następne**: drugie/trzecie przejście + `resolve` u użytkownika (pierwsze sprzedane) → `details.py` (opis raz
-  na ofertę, do ekstrakcji parametrów) → etap 3.
+* **Drugie przejście (od 700 zł, 2026-10-11)**: 17 min, 209 zapytań, 7,7 MB, 17 205 aktywnych ≥ 700 zł
+  (17 018 → `below_min`), nowe 64, zmienione 14; kontrola pokrycia: brakuje ~24 (najwięcej 1699–1820 zł: 17 –
+  pewnie oferty zagraniczne z ceną filtra ≠ `price`).
+* **`details.py` (zrobione)**: `python -m analyzer details [--limit N]` i w `watch` między przejściami (do startu
+  następnego): sidebar RAZ na ofertę (najnowsze ID najpierw), tabela `details` (migracja v4: opis, atrybuty JSON,
+  „Dodane” → `created_est` i `listings.created_at`, `business`, `seller_currency`, `photo_count`, `is_localized`),
+  `listings.details_at` + `content_hash`, surowy sidebar w `raw` (kind `sidebar`, dane sprzedawcy wycięte). Sprzedana /
+  usunięta przy okazji → stan przez `resolver.apply_result`; resolver zapisuje szczegóły sprzedanej, jeśli ich nie
+  było. Przerwa `ANALYZER_DETAILS_DELAY_S` 2–5 s → zaległość ~17 tys. ≈ 17 h, potem tylko nowe (~kilkaset/dobę).
+  „Dodane” w sidebar_active = „tygodnia”, zrzut: „3 mies.”, „3 min.” (⚠ nie wiadomo, czy podbicie zmienia datę).
+* **`ATRYBUTY.md`**: segmenty kupujących (gaming, MacBook, biznesowe, ultrabooki, 2w1/dotykowe, stacje robocze,
+  budżetowe, Chromebooki, uszkodzone, retro) + parametry wspólne i klucze konfiguracji do grupowania cen.
+* **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
 
@@ -156,7 +167,8 @@ python -m analyzer crawl --catalog 3580         # pełne przejście kategorii ->
 python -m analyzer status                       # podsumowanie bazy
 python -m pytest analyzer/tests sniper/tests    # testy bez sieci
 python -m analyzer resolve [--limit N]          # zniknięte z katalogu -> sold / deleted / unlisted
-python -m analyzer watch                        # bez końca: crawl + resolve co 10-14 h
+python -m analyzer details [--limit N]          # opis + atrybuty raz na ofertę
+python -m analyzer watch                        # bez końca: crawl + resolve, między przejściami details
 # jeszcze nie istnieją: extract (etap 3), report (etap 4)
 ```
 

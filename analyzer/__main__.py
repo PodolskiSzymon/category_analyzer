@@ -3,7 +3,8 @@
   probe  --catalog 3580 [--item ID ...]   etap 0: odpowiedzi Vinted do sprawdzenia założeń -> data/probe/
   crawl  --catalog 3580                   pełne przejście kategorii -> data/analyzer.db (wznawia przerwane)
   probe-show [folder]                     wyciąg z plików probe do wklejenia (bez sieci)
-  watch  [--catalog 3580]                 bez końca: crawl + resolve co 10-14 h (ANALYZER_WATCH_HOURS)
+  watch  [--catalog 3580]                 bez końca: crawl + resolve, między przejściami details (10-14 h)
+  details [--limit N]                     szczegóły ofert (opis, atrybuty, „Dodane”) raz na ofertę
   resolve [--limit N]                     zniknięte z katalogu -> sold / deleted / unlisted (1 zapytanie/ofertę)
   status                                  podsumowanie bazy (oferty, stany, partycje, przejścia, transfer)
 """
@@ -50,14 +51,18 @@ async def cmd_crawl(cfg, catalogs):
         conn.close()
 
 
-async def cmd_watch(cfg, catalogs, resolve_limit):
-    """Bez końca: pełne przejście każdej kategorii + resolve, potem przerwa ANALYZER_WATCH_HOURS (losowo)."""
+async def cmd_watch(cfg, catalogs, resolve_limit, with_details=True):
+    """Bez końca: pełne przejście każdej kategorii + resolve, potem do następnego przejścia (ANALYZER_WATCH_HOURS,
+    losowo) spokojne pobieranie szczegółów ofert, które ich jeszcze nie mają."""
     import random
+    from datetime import datetime, timedelta, timezone
 
     from .crawler import Crawler
+    from .details import fetch_details
     from .resolver import resolve
 
     while True:
+        next_start = datetime.now(timezone.utc) + timedelta(hours=random.uniform(*cfg.watch_hours))
         conn = db.connect(cfg.db_path)
         session = build_session()
         try:
@@ -65,18 +70,36 @@ async def cmd_watch(cfg, catalogs, resolve_limit):
             for catalog_id in catalogs:
                 await crawler.run(catalog_id)
             await resolve(cfg, session, conn, resolve_limit)
-            log.info("[TRANSFER] %s", session.traffic.window_report()[0])
             for line in status_lines(conn):
                 log.info("[STATUS] %s", line)
+            if with_details:
+                log.info("[WATCH] Do następnego przejścia (%s UTC) pobieram szczegóły ofert.",
+                         next_start.strftime("%H:%M"))
+                await fetch_details(cfg, session, conn, deadline=next_start)
+            log.info("[TRANSFER] %s", session.traffic.window_report()[0])
         except Exception:
-            log.exception("[WATCH] Przejście przerwane błędem - spróbuję przy następnym cyklu.")
+            log.exception("[WATCH] Cykl przerwany błędem - spróbuję przy następnym.")
         finally:
             await session.close()
             conn.close()
-        hours = random.uniform(*cfg.watch_hours)
+        wait = (next_start - datetime.now(timezone.utc)).total_seconds()
         log.info("[WATCH] Następne przejście za %.1f h (Ctrl+C = koniec; przerwane przejście zostanie wznowione).",
-                 hours)
-        await asyncio.sleep(hours * 3600)
+                 max(wait, 0) / 3600)
+        if wait > 0:
+            await asyncio.sleep(wait)
+
+
+async def cmd_details(cfg, limit):
+    from .details import fetch_details
+
+    conn = db.connect(cfg.db_path)
+    session = build_session()
+    try:
+        await fetch_details(cfg, session, conn, limit)
+        log.info("[TRANSFER] %s", session.traffic.window_report()[0])
+    finally:
+        await session.close()
+        conn.close()
 
 
 async def cmd_resolve(cfg, limit):
@@ -136,6 +159,9 @@ def status_lines(conn):
     for row in conn.execute("SELECT catalog_id, state, COUNT(*) AS n FROM listings GROUP BY catalog_id, state "
                             "ORDER BY catalog_id, n DESC"):
         lines.append(f"kategoria {row['catalog_id']}: {row['state']:<13} {row['n']}")
+    for row in conn.execute("SELECT catalog_id, COUNT(*) AS n, SUM(details_at IS NOT NULL) AS d FROM listings "
+                            "WHERE state IN ('active', 'reserved', 'unlisted') GROUP BY catalog_id"):
+        lines.append(f"kategoria {row['catalog_id']}: szczegóły pobrane dla {row['d']}/{row['n']} śledzonych ofert")
     for row in conn.execute(
             "SELECT catalog_id, COUNT(*) AS n, SUM(last_total) AS total, SUM(last_items) AS items, "
             "SUM(oversize) AS oversize FROM partitions WHERE active=1 GROUP BY catalog_id"):
@@ -160,6 +186,9 @@ def main(argv=None):
     p_watch = sub.add_parser("watch", help="bez końca: crawl + resolve co ANALYZER_WATCH_HOURS (domyślnie 10-14 h)")
     p_watch.add_argument("--catalog", type=int, action="append")
     p_watch.add_argument("--resolve-limit", type=int, default=None)
+    p_watch.add_argument("--no-details", action="store_true", help="bez pobierania szczegółów między przejściami")
+    p_details = sub.add_parser("details", help="szczegóły ofert (opis, atrybuty) - raz na ofertę")
+    p_details.add_argument("--limit", type=int, default=None)
     p_resolve = sub.add_parser("resolve", help="etap 2: zniknięte oferty -> sprzedana / usunięta / niewidoczna")
     p_resolve.add_argument("--limit", type=int, default=None, help="najwyżej tyle ofert w jednym uruchomieniu")
     p_probe = sub.add_parser("probe", help="etap 0: zapis odpowiedzi Vinted do sprawdzenia założeń")
@@ -175,7 +204,9 @@ def main(argv=None):
     if args.command == "crawl":
         asyncio.run(cmd_crawl(cfg, args.catalog or list(cfg.catalogs)))
     elif args.command == "watch":
-        asyncio.run(cmd_watch(cfg, args.catalog or list(cfg.catalogs), args.resolve_limit))
+        asyncio.run(cmd_watch(cfg, args.catalog or list(cfg.catalogs), args.resolve_limit, not args.no_details))
+    elif args.command == "details":
+        asyncio.run(cmd_details(cfg, args.limit))
     elif args.command == "resolve":
         asyncio.run(cmd_resolve(cfg, args.limit))
     elif args.command == "probe":

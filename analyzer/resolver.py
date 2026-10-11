@@ -88,6 +88,9 @@ def apply_result(conn, row, state, status_code, body, now):
     db.put_raw(conn, row["id"], "resolve", {"_status": status_code, "body": redact(body)}, now)
     if state is None:
         return
+    if status_code == 200 and row["details_at"] is None and isinstance(body, dict):
+        from .details import store_details   # sprzedana bez szczegółów - opis jest w tej samej odpowiedzi
+        store_details(conn, row["id"], body, now)
     if state == "sold":
         sidebar = unwrap_sidebar(body)
         price = to_float(sidebar.get("price"))

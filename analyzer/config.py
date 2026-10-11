@@ -68,6 +68,8 @@ class AnalyzerConfig:
     gone_after_runs: int = _env_int("ANALYZER_GONE_AFTER_RUNS", 2)
     # Sól do hasha sprzedawcy (RODO). Pusta = hash sprzedawcy nie jest zapisywany wcale.
     seller_salt: str = _env("ANALYZER_SELLER_SALT")
+    # Szczegóły ofert (details): losowa przerwa między zapytaniami (s).
+    details_delay: tuple = field(default_factory=lambda: parse_range(_env("ANALYZER_DETAILS_DELAY_S"), (2.0, 5.0)))
     # Tryb `watch`: odstęp między startami pełnych przejść (godziny, zakres „od-do” - losowo).
     watch_hours: tuple = field(default_factory=lambda: parse_range(_env("ANALYZER_WATCH_HOURS"), (10.0, 14.0)))
     # Niedokończone przejście młodsze niż tyle godzin jest wznawiane zamiast zaczynane od nowa.
@@ -79,6 +81,9 @@ class AnalyzerConfig:
 
     def pick_delay(self):
         return random.uniform(*self.page_delay)
+
+    def pick_details_delay(self):
+        return random.uniform(*self.details_delay)
 
 
 def build_session():

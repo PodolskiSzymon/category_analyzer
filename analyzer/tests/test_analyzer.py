@@ -421,3 +421,94 @@ def test_fresh_plan_starts_at_price_min():
     conn, _, _, _ = crawl(make_cfg(price_min=700.0), market)
     assert min(lo for lo, _, _ in market.requests) == 700
     assert conn.execute("SELECT MIN(o.price) FROM observations o").fetchone()[0] >= 700
+
+
+# ------------------------------------------------------------------ details
+
+def test_parse_upload_age():
+    from datetime import timedelta
+    from analyzer.details import parse_upload_age
+
+    assert parse_upload_age("3 min.") == timedelta(minutes=3)
+    assert parse_upload_age("5 godz.") == timedelta(hours=5)
+    assert parse_upload_age("2 dni") == timedelta(days=2)
+    assert parse_upload_age("dnia") == timedelta(days=1)
+    assert parse_upload_age("tygodnia") == timedelta(weeks=1)       # prawdziwa wartość z sidebar_active
+    assert parse_upload_age("3 mies.") == timedelta(days=90)         # zrzut użytkownika (Razer Blade)
+    assert parse_upload_age("2 lata") == timedelta(days=730)
+    assert parse_upload_age("przed chwilą") == timedelta(0)
+    assert parse_upload_age("") is None and parse_upload_age("???") is None
+
+
+async def _mock_session(handler):
+    from sniper.session import VintedSession
+
+    session = VintedSession(proxy_url=None)
+    await session.client.aclose()
+    session.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return session
+
+
+def test_fetch_details_flow():
+    from analyzer.details import fetch_details
+
+    market = FakeMarket(market_prices(300, seed=9))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    newest = sorted(market.items, reverse=True)
+    sold_id, deleted_id = newest[1], newest[2]
+    active = json.loads(json.dumps(SNIPER_FIXTURES["sidebar_active"]))
+
+    def handler(request):
+        item_id = int(request.url.path.split("/")[4])
+        if item_id == sold_id:
+            return httpx.Response(200, json=SNIPER_FIXTURES["sidebar_sold"])
+        if item_id == deleted_id:
+            return httpx.Response(404, json=DELETED_BODY)
+        return httpx.Response(200, json=active)
+
+    async def go(limit):
+        session = await _mock_session(handler)
+        try:
+            return await fetch_details(make_cfg(), session, conn, limit=limit, sleep=no_sleep)
+        finally:
+            await session.client.aclose()
+
+    counts = asyncio.run(go(5))
+    assert counts == {"ok": 3, "sold": 1, "deleted": 1}
+    row = conn.execute("SELECT * FROM details WHERE listing_id=?", (newest[0],)).fetchone()
+    assert row["description"] == "Naujas, nenaudotas." and row["upload_age"] == "tygodnia"
+    assert json.loads(row["attributes_json"])["brand"] == "Samsung"
+    assert row["seller_currency"] == "EUR" and row["photo_count"] == 3 and row["business"] == 0
+    listing = conn.execute("SELECT * FROM listings WHERE id=?", (newest[0],)).fetchone()
+    assert listing["details_at"] and listing["content_hash"] and listing["created_at"] < listing["first_seen"]
+    states = dict(conn.execute("SELECT id, state FROM listings WHERE id IN (?, ?)", (sold_id, deleted_id)).fetchall())
+    assert states == {sold_id: "sold", deleted_id: "deleted"}
+    assert conn.execute("SELECT description FROM details WHERE listing_id=?", (sold_id,)).fetchone()[0]
+    raw = json.dumps(db.get_raw(conn, newest[0], "sidebar")[0][1])
+    assert "148344250" not in raw                                       # seller_id wycięty (RODO)
+
+    assert asyncio.run(go(None))["ok"] == len(market.items) - 5       # druga runda: tylko brakujące
+    assert asyncio.run(go(None)) == {}
+
+
+def test_fetch_details_respects_deadline():
+    from datetime import datetime, timedelta, timezone
+    from analyzer.details import fetch_details
+
+    market = FakeMarket(market_prices(50, seed=10))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    ticks = iter(range(100))
+    start = datetime(2026, 10, 11, tzinfo=timezone.utc)
+
+    def clock():
+        return start + timedelta(minutes=next(ticks))
+
+    async def go():
+        session = await _mock_session(lambda r: httpx.Response(200, json=SNIPER_FIXTURES["sidebar_active"]))
+        try:
+            return await fetch_details(make_cfg(), session, conn, deadline=start + timedelta(minutes=7),
+                                       sleep=no_sleep, clock=clock)
+        finally:
+            await session.client.aclose()
+
+    assert asyncio.run(go()) == {"ok": 7}
