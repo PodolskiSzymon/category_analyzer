@@ -74,7 +74,7 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `service_fee` + `total_item_price` są (dict amount/currency_code). **Filtr ceny nie pokrywa się co do grosza
   z `price`**: price_to=666.98 zwróciło oferty 667.76–667.88 zł (prawdopodobnie przeliczenia walut) → zapytania
   poszerzone o `ANALYZER_PRICE_MARGIN` (1 zł) z obu stron, duplikaty usuwa ID. Transfer: strona 96 ofert ≈ 26 KB
-  (≈ 0,27 KB/ofertę). Sidebar sprzedanej (9238023547): HTTP 200, `code` 0, jak `sidebar_sold`. **Brak jeszcze
+  (≈ 0,27 KB/ofertę). Sidebar sprzedanej: karta pamięci 9238023547 i laptop 10295873538 (Razer Blade Pro) – HTTP 200, `code` 0, te same klucze co `sidebar_sold` (endpoint wspólny dla kategorii). Drugi probe: [414.59; 415.59] dał 21 ofert z `price` poza zakresem – filtr działa na jakiejś wewnętrznej cenie (waluta sprzedawcy?), ale to NIE gubi ofert: każda oferta trafia do tej partycji, w której leży jej cena „filtrowa”, a partycje pokrywają cały zakres bez dziur. **Brak jeszcze
   odpowiedzi dla USUNIĘTEJ oferty** (potrzebna do resolvera). favourite_count/view_count → ostatnia wartość
   w `listings` (migracja v2). Sortowanie `newest_first` (jedyne sprawdzone).
 * **Następne**: fixtures z probe → poprawki parsera/limitu → pierwsze pełne `crawl` u użytkownika → etap 2
