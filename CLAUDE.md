@@ -80,6 +80,31 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
 * **Następne**: fixtures z probe → poprawki parsera/limitu → pierwsze pełne `crawl` u użytkownika → etap 2
   (`resolver.py`, `details.py` – resolver potrzebuje odpowiedzi sidebar dla USUNIĘTEJ oferty: `probe --item ID`).
 
+## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
+
+* Użytkownik ma drugie konto na rynku niemieckim (aplikacja po niemiecku). Wystawił tam testowo „długopis premium”
+  (ID **10327664119**, BIC, Długopisy) – po to, żeby go usunąć i zobaczyć `probe --item` dla **usuniętej** oferty.
+* Z polskiego konta ogłoszenie otwiera się z linku `www.vinted.pl/items/10327664119-dlugopis-premium` – cena
+  przeliczona na zł (88,80 zł / 96,14 zł z opłatą, „Cena przedmiotu i wszystkie pozostałe opłaty są przeliczone na
+  twoją walutę”), „Dodane 3 min.”. Vinted pytał, w jakim języku otworzyć ogłoszenie (tłumaczenie Google opisu).
+* **Ale w polskim katalogu (Długopisy, `newest_first`) tej oferty nie było widać.** Niepotwierdzone, dlaczego:
+  opóźnienie indeksowania? nowe konto bez opinii? oferty z DE nie trafiają do katalogu PL (albo tylko część)?
+  Jednocześnie katalog PL laptopów MA oferty zagraniczne (np. fińska „Asus kannettava tietokone” za 665,98 zł =
+  przeliczone EUR) – więc część zagranicznych ofert w PL jest, część nie.
+* Wnioski / hipotezy do sprawdzenia:
+  - **ID ofert są globalne** (ta sama numeracja ~10327… co oferty PL) → klucz bazy = ID działa dla wszystkich rynków,
+    a `details/sidebar` na vinted.pl działa także dla ofert z innych krajów.
+  - Katalog PL może NIE pokazywać całego rynku europejskiego → **Sniper może przeglądać też inne rynki**
+    (vinted.de / .fr / .it …) i znajdować okazje, których nie widać na .pl, a kupować przez konto PL (oferta otwiera
+    się z linku na .pl). ⚠ Endpoint katalogu innych rynków (np. `api.vinted.de/svc-catalogue/items`?) i warunki
+    wysyłki do PL – tylko z cURL z F12 / testu u użytkownika, NIE zgadywać.
+  - Ceny zagranicznych ofert w PL są przeliczane z waluty sprzedawcy – to prawdopodobnie tłumaczy, czemu filtr
+    `price_from/price_to` nie pokrywa się co do grosza z `price` (filtr na cenie w walucie sprzedawcy?).
+  - Przy analizie rynku: rozdzielić oferty krajowe i zagraniczne (waluta sprzedawcy z `sidebar.conversion.seller_currency`),
+    bo mają inne koszty wysyłki i inną dynamikę sprzedaży.
+* Do zrobienia u użytkownika: po usunięciu długopisu `python -m analyzer probe --catalog 3580 --item 10327664119`
+  (odpowiedź dla usuniętej oferty → resolver), i sprawdzić, czy długopis pojawił się później w katalogu PL.
+
 ## Za co wziąć się najpierw (kolejność dla nowego czatu)
 
 0. **Przed pisaniem crawlera – dane od użytkownika** (bez nich nie zgadujemy):

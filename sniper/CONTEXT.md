@@ -113,6 +113,14 @@ Pełna lista: `sniper/.env.example`. `.env` i `sniper/logs/` (logi, `session.jso
 * Inne możliwe oszczędności: wysyłać do `api.vinted.pl` tylko niezbędne ciastka (połowa każdego skanu
   to upload nagłówków), rzadsze skanowanie, wyższy `SNIPER_PRICE_FROM`.
 
+## Pomysł: inne rynki Vinted (obserwacja z Category Analyzer, 2026-10-11)
+
+Oferta wystawiona z niemieckiego konta (ID 10327664119) otwiera się z linku na vinted.pl (cena przeliczona na zł,
+Vinted pyta o język ogłoszenia), ale nie było jej w katalogu PL. Katalog .pl pokazuje tylko część ofert zagranicznych
+→ Zwiadowca mógłby skanować też katalogi innych rynków (.de/.fr/.it) i kupować z konta PL. ID są globalne.
+⚠ Endpointy innych rynków i wysyłka do PL – tylko z cURL z F12 / testu u użytkownika. Szczegóły: `CLAUDE.md` w repo
+`category_analyzer` (sekcja „Obserwacja: oferty z innych rynków”).
+
 ## Preferencje użytkownika
 
 * Odpowiedzi i komentarze w kodzie po polsku; konkretnie, z wynikami testów.
