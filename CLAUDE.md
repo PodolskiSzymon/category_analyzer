@@ -92,6 +92,11 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   0 zgubionych) → `ANALYZER_PRICE_MARGIN` domyślnie 0; `status` pokazuje kontrolę pokrycia per partycja (oferty
   w bazie z ceną w zakresie ±1 zł vs `total_entries`). Rozkład: 0–2500 zł gęsto (partycje po kilka–kilkadziesiąt zł),
   >20 000 zł 22 oferty. Kolejne przejścia bez dzielenia ≈ 470 zapytań.
+* **Cena minimalna 700 zł** (decyzja użytkownika 2026-10-11: laptopy < 700 zł to zwykle bezużyteczne starocie):
+  `ANALYZER_PRICE_MIN=700` domyślnie. Istniejący plan partycji jest dopasowywany przy każdym `crawl`
+  (`Crawler._apply_price_min`: partycje poniżej wyłączone, przecinające próg przycięte, przy obniżeniu progu dochodzi
+  partycja [nowy próg, najniższa]). Oferty z ostatnią ceną < progu → stan `below_min` (nie idą do resolvera);
+  resolver: aktywna, ale potaniała poniżej progu → `below_min`; oferta znów ≥ progu w katalogu → `active`.
 * **Tryb `watch`** (`python -m analyzer watch`): bez końca crawl + resolve, przerwa `ANALYZER_WATCH_HOURS` (10–14 h).
 * **Następne**: drugie/trzecie przejście + `resolve` u użytkownika (pierwsze sprzedane) → `details.py` (opis raz
   na ofertę, do ekstrakcji parametrów) → etap 3.

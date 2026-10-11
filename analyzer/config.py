@@ -51,7 +51,9 @@ class AnalyzerConfig:
     max_results: int = _env_int("ANALYZER_MAX_RESULTS", 960)
     partition_fill: float = _env_float("ANALYZER_PARTITION_FILL", 0.9)
     # Zakres cen całej kategorii w zł; powyżej price_max jest jedna otwarta partycja „od price_max”.
-    price_min: float = _env_float("ANALYZER_PRICE_MIN", 0.0)
+    # Laptopy tańsze niż price_min nas nie interesują (decyzja użytkownika 2026-10-11: < 700 zł to zwykle
+    # bezużyteczne starocie) - nie crawlujemy ich i nie śledzimy (stan below_min).
+    price_min: float = _env_float("ANALYZER_PRICE_MIN", 700.0)
     price_max: float = _env_float("ANALYZER_PRICE_MAX", 20000.0)
     initial_partitions: int = _env_int("ANALYZER_INITIAL_PARTITIONS", 8)
     # Partycja węższa niż tyle zł nie jest już dzielona po cenie (potrzebna druga oś - marka/stan, później).

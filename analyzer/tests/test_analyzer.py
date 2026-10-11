@@ -390,3 +390,34 @@ def test_coverage_check_reports_missing():
         conn.execute("DELETE FROM raw")
         conn.execute("DELETE FROM listings WHERE id NOT IN (SELECT listing_id FROM observations)")
     assert "brakuje łącznie ~5 ofert" in coverage_lines(conn, tolerance=0.0)[0]
+
+
+def test_price_min_applied_to_existing_plan():
+    market = FakeMarket(market_prices(6000, seed=7))
+    conn, _, _, _ = crawl(make_cfg(), market)                       # stara baza: plan od 0 zł
+    below = {i for i, p in market.items.items() if p < 700}
+    assert below
+    market.requests.clear()
+    crawl(make_cfg(price_min=700.0), market, conn)
+    assert all(lo is not None and lo >= 700 for lo, _, _ in market.requests)   # nic poniżej progu
+    assert coverage_gaps(active_ranges(conn), 700) == []
+    states = dict(conn.execute("SELECT state, COUNT(*) FROM listings GROUP BY state").fetchall())
+    assert states.get("below_min") == len(below) and "gone_pending" not in states
+    expected = sum(1 for p in market.items.values() if p >= 700)
+    assert conn.execute("SELECT COUNT(*) FROM listings WHERE state='active'").fetchone()[0] == expected
+
+    market.items[1000] = 800.0 if market.items[1000] < 700 else market.items[1000]   # podrożała -> znów śledzona
+    crawl(make_cfg(price_min=700.0), market, conn)
+    assert conn.execute("SELECT state FROM listings WHERE id=1000").fetchone()[0] == "active"
+
+    market.requests.clear()                                          # próg obniżony -> dochodzi partycja [500, 700)
+    crawl(make_cfg(price_min=500.0), market, conn)
+    assert coverage_gaps(active_ranges(conn), 500) == []
+    assert any(lo == 500 for lo, _, _ in market.requests)
+
+
+def test_fresh_plan_starts_at_price_min():
+    market = FakeMarket(market_prices(3000, seed=8))
+    conn, _, _, _ = crawl(make_cfg(price_min=700.0), market)
+    assert min(lo for lo, _, _ in market.requests) == 700
+    assert conn.execute("SELECT MIN(o.price) FROM observations o").fetchone()[0] >= 700

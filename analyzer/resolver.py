@@ -5,7 +5,8 @@ Odpowiedzi potwierdzone u użytkownika (2026-10-11):
                  (karta pamięci 9238023547, laptop 10295873538; fixture sniper/tests/fixtures.json sidebar_sold),
   * usunięta   - HTTP 404, code 104 (oferta 10327664119 usunięta przez użytkownika; strona: „Page not found”),
   * aktywna    - HTTP 200, item_closing_action=null (sidebar_active).
-Aktywna, a niewidoczna w katalogu → stan `unlisted` (sprawdzamy ponownie po ANALYZER_RECHECK_DAYS).
+Aktywna, a niewidoczna w katalogu → stan `unlisted` (sprawdzamy ponownie po ANALYZER_RECHECK_DAYS), chyba że jej
+cena spadła poniżej ANALYZER_PRICE_MIN → `below_min` (poza zakresem, nie śledzimy).
 
 Cena sprzedaży: cena z sidebara sprzedanej oferty (stan w chwili sprzedaży, w zł - Vinted przelicza na walutę
 kupującego), a gdy jej brak - ostatnia cena z katalogu. To cena WYSTAWIENIA - górna granica ceny transakcji.
@@ -127,6 +128,10 @@ async def resolve(cfg, session, conn, limit=None, sleep=asyncio.sleep):
             counts["błąd"] = counts.get("błąd", 0) + 1
             continue
         state, reason = classify(status_code, body)
+        if state == "unlisted" and cfg.price_min:
+            price = to_float(unwrap_sidebar(body).get("price"))
+            if price is not None and price < cfg.price_min:   # zniknęła z naszego zakresu, bo potaniała
+                state, reason = "below_min", f"cena {price:g} zł < {cfg.price_min:g} zł"
         with conn:
             apply_result(conn, row, state, status_code, body, db.utcnow())
         key = state or "nieznany"
