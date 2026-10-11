@@ -245,3 +245,30 @@ def test_probe_end_to_end(tmp_path, monkeypatch):
     assert "sidebar 123: HTTP 404" in summary
     saved = json.loads((out / "01_page1.json").read_text(encoding="utf-8"))
     assert saved["body"]["items"][0]["user"] == "<redacted>"
+
+
+def test_probe_show_reads_saved_files(tmp_path, capsys):
+    from analyzer.probe import show
+
+    (tmp_path / "01_page1.json").write_text(json.dumps({"_status": 200, "body": {"items": [
+        {"id": 1, "photos": [{"a": 1}, {"b": 2}], "item_box": {"first_line": "Lenovo"}},
+        {"id": 2, "item_box": {"first_line": "Dell"}}]}}), encoding="utf-8")
+    (tmp_path / "03_from.json").write_text(json.dumps({"_params": {"price_from": "10", "price_to": "11"}, "body": {
+        "items": [{"id": 3, "price": {"amount": "10.5"}}, {"id": 4, "price": {"amount": "12.0"},
+                                                          "total_item_price": {"amount": "13.1"}}]}}),
+        encoding="utf-8")
+    show(tmp_path)
+    out = (tmp_path / "show.txt").read_text(encoding="utf-8")
+    assert '"Dell"' in out and "(+1)" in out
+    assert "pozycji spoza zakresu 1" in out and '"12.0"' in out
+
+
+def test_counts_update_listing_without_new_observation():
+    conn = db.connect(":memory:")
+    base = {"id": 5, "price": {"amount": "100", "currency_code": "PLN"}, "favourite_count": 1, "view_count": 10}
+    db.upsert_item(conn, parse_item(base, 3580), 1, "2026-10-11T10:00:00.000+00:00")
+    assert db.upsert_item(conn, parse_item({**base, "favourite_count": 4, "view_count": 50}, 3580), 2,
+                          "2026-10-11T11:00:00.000+00:00") == "same"
+    row = conn.execute("SELECT favourite_count, view_count FROM listings WHERE id=5").fetchone()
+    assert tuple(row) == (4, 50)
+    assert conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1

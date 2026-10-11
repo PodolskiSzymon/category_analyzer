@@ -135,6 +135,57 @@ class Probe:
     def finish(self):
         traffic = self.session.traffic.total
         used = sum(b["sent"] + b["received"] for b in traffic.values())
-        self.note(f"\nTransfer: {used / 1024:.1f} KB. Pliki: {self.out}")
+        parts = ", ".join(f"{k} {(b['sent'] + b['received']) / 1024:.1f} KB / {b['requests']} zap."
+                          for k, b in traffic.items() if b["requests"])
+        self.note(f"\nTransfer: {used / 1024:.1f} KB ({parts}). Pliki: {self.out}")
         (self.out / "summary.txt").write_text("\n".join(self.lines) + "\n", encoding="utf-8")
         return self.out
+
+
+def latest_probe_dir():
+    dirs = sorted(p for p in (ROOT / "data" / "probe").glob("*") if p.is_dir())
+    return dirs[-1] if dirs else None
+
+
+def show(probe_dir=None):
+    """Krótki wyciąg z zapisanych plików probe (do wklejenia w rozmowie) - bez sieci. Zapis też do show.txt."""
+    probe_dir = Path(probe_dir) if probe_dir else latest_probe_dir()
+    if not probe_dir or not probe_dir.exists():
+        print("Brak folderu data/probe/* - najpierw: python -m analyzer probe")
+        return None
+    lines = [f"Folder: {probe_dir}"]
+
+    def load(name):
+        path = probe_dir / f"{name}.json"
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+    page1 = load("01_page1")
+    items = ((page1 or {}).get("body") or {}).get("items") or []
+    if items:
+        sample = dict(items[0])
+        if isinstance(sample.get("photos"), list):
+            sample["photos"] = sample["photos"][:1] + ([f"... (+{len(items[0]['photos']) - 1})"]
+                                                       if len(items[0]["photos"]) > 1 else [])
+        lines += ["", "[A] Pierwsza pozycja katalogu (strona 1):", json.dumps(sample, ensure_ascii=False, indent=1)]
+        lines += ["", "[B] item_box kolejnych 5 pozycji:"]
+        lines += [json.dumps(it.get("item_box"), ensure_ascii=False) for it in items[1:6]]
+
+    data = load("03_from")
+    if data:
+        params = data.get("_params") or {}
+        lo, hi = float(params.get("price_from", 0)), float(params.get("price_to", 0))
+        outside = []
+        for it in (data.get("body") or {}).get("items") or []:
+            price = it.get("price")
+            amount = float(price.get("amount")) if isinstance(price, dict) else None
+            if amount is not None and not (lo <= amount <= hi):
+                outside.append((amount, json.dumps(price, ensure_ascii=False),
+                                json.dumps(it.get("total_item_price"), ensure_ascii=False)))
+        lines += ["", f"[C] Zapytanie price_from={params.get('price_from')} price_to={params.get('price_to')}: "
+                      f"pozycji spoza zakresu {len(outside)}; przykłady (price | total_item_price):"]
+        lines += [f"    {p} | {t}" for _, p, t in sorted(set(outside))[:15]]
+
+    text = "\n".join(lines)
+    print(text)
+    (probe_dir / "show.txt").write_text(text + "\n", encoding="utf-8")
+    return probe_dir

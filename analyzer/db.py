@@ -99,7 +99,14 @@ CREATE TABLE crawl_runs (
 );
 """
 
-MIGRATIONS = [SCHEMA_V1]
+# v2 (probe 2026-10-11): katalog podaje favourite_count i view_count - zmieniają się przy prawie każdym przejściu,
+# więc trzymamy tylko ostatnią wartość w listings (bez nowego wiersza observations za każdym razem).
+SCHEMA_V2 = """
+ALTER TABLE listings ADD COLUMN favourite_count INTEGER;
+ALTER TABLE listings ADD COLUMN view_count INTEGER;
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2]
 
 
 def utcnow():
@@ -145,6 +152,8 @@ def last_observation(conn, listing_id):
 
 
 _OBSERVED = ("price", "total_price", "is_reserved", "favourite_count")
+# Nowy wiersz observations (i surowy JSON) tylko przy zmianie ceny / rezerwacji; polubienia i wyświetlenia
+# aktualizujemy w listings (ostatnia wartość przed zniknięciem oferty = „popyt” w chwili sprzedaży).
 _PRICE_STATUS = ("price", "total_price", "is_reserved")
 # Stany, z których oferta wraca do active/reserved, gdy znów pojawi się w katalogu.
 _REVIVABLE = "('active', 'reserved', 'gone_pending', 'hidden')"
@@ -161,10 +170,11 @@ def upsert_item(conn, item, run_id, seen_at):
     if row is None:
         conn.execute(
             """INSERT INTO listings (id, catalog_id, title, brand, status_label, currency, photo_url, photo_ts,
-                   first_seen, last_seen, last_run_id, state, state_at, seller_hash)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)""",
+                   first_seen, last_seen, last_run_id, state, state_at, seller_hash, favourite_count, view_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (item.id, item.catalog_id, item.title, item.brand, item.status_label, item.currency, item.photo_url,
-             item.photo_ts, seen_at, seen_at, run_id, seen_at, item.seller_hash))
+             item.photo_ts, seen_at, seen_at, run_id, item.state, seen_at, item.seller_hash, item.favourite_count,
+             item.view_count))
         conn.execute("INSERT INTO observations (listing_id, seen_at, price, total_price, is_reserved, favourite_count)"
                      " VALUES (?, ?, ?, ?, ?, ?)", (item.id, seen_at, *obs.values()))
         put_raw(conn, item.id, "catalog", item.raw, seen_at)
@@ -176,18 +186,16 @@ def upsert_item(conn, item, run_id, seen_at):
                title=COALESCE(?, title), brand=COALESCE(?, brand), status_label=COALESCE(?, status_label),
                currency=COALESCE(?, currency), photo_url=COALESCE(?, photo_url), photo_ts=COALESCE(photo_ts, ?),
                seller_hash=COALESCE(seller_hash, ?),
+               favourite_count=COALESCE(?, favourite_count), view_count=COALESCE(?, view_count),
                state_at=CASE WHEN state IN {_REVIVABLE} AND state != ? THEN ? ELSE state_at END,
                state=CASE WHEN state IN {_REVIVABLE} THEN ? ELSE state END
            WHERE id=?""",
         (seen_at, run_id, item.title, item.brand, item.status_label, item.currency, item.photo_url, item.photo_ts,
-         item.seller_hash, item.state, seen_at, item.state, item.id))
+         item.seller_hash, item.favourite_count, item.view_count, item.state, seen_at, item.state, item.id))
     last = last_observation(conn, item.id)
-    if last is not None and all(last[k] == v for k, v in obs.items()):
+    if last is not None and all(last[k] == obs[k] for k in _PRICE_STATUS):
         return "same"
     conn.execute("INSERT OR REPLACE INTO observations (listing_id, seen_at, price, total_price, is_reserved, "
                  "favourite_count) VALUES (?, ?, ?, ?, ?, ?)", (item.id, seen_at, *obs.values()))
-    # Sama zmiana liczby polubień to tylko wiersz obserwacji; surowy JSON - przy zmianie ceny / rezerwacji.
-    if last is None or any(last[k] != obs[k] for k in _PRICE_STATUS):
-        put_raw(conn, item.id, "catalog", item.raw, seen_at)
-        return "changed"
-    return "same"
+    put_raw(conn, item.id, "catalog", item.raw, seen_at)
+    return "changed"

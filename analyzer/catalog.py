@@ -50,6 +50,7 @@ class CatalogItem:
     photo_ts: int = None
     is_reserved: int = None
     favourite_count: int = None
+    view_count: int = None
     seller_hash: str = None
     raw: dict = field(default_factory=dict, repr=False)
 
@@ -82,6 +83,7 @@ def parse_item(item, catalog_id, seller_salt=""):
     price = item.get("price")
     currency = price.get("currency_code") if isinstance(price, dict) else item.get("currency")
     favourites = item.get("favourite_count")
+    views = item.get("view_count")
     return CatalogItem(
         id=int(item["id"]),
         catalog_id=int(item.get("catalog_id") or catalog_id),
@@ -95,6 +97,7 @@ def parse_item(item, catalog_id, seller_salt=""):
         photo_ts=high_res.get("timestamp"),
         is_reserved=to_bool(item.get("is_reserved")),
         favourite_count=int(favourites) if isinstance(favourites, (int, float)) else None,
+        view_count=int(views) if isinstance(views, (int, float)) else None,
         seller_hash=_seller_hash(item, seller_salt),
         raw=strip_personal(item),
     )

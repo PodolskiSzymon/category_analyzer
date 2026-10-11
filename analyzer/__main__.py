@@ -2,6 +2,7 @@
 
   probe  --catalog 3580 [--item ID ...]   etap 0: odpowiedzi Vinted do sprawdzenia założeń -> data/probe/
   crawl  --catalog 3580                   pełne przejście kategorii -> data/analyzer.db (wznawia przerwane)
+  probe-show [folder]                     wyciąg z plików probe do wklejenia (bez sieci)
   status                                  podsumowanie bazy (oferty, stany, partycje, przejścia, transfer)
 """
 import argparse
@@ -84,6 +85,8 @@ def main(argv=None):
     p_probe = sub.add_parser("probe", help="etap 0: zapis odpowiedzi Vinted do sprawdzenia założeń")
     p_probe.add_argument("--catalog", type=int, default=None)
     p_probe.add_argument("--item", type=int, action="append", default=[], help="ID oferty do details/sidebar")
+    p_show = sub.add_parser("probe-show", help="wyciąg z zapisanych plików probe (bez sieci)")
+    p_show.add_argument("folder", nargs="?", default=None, help="domyślnie najnowszy data/probe/*")
     sub.add_parser("status", help="podsumowanie bazy")
     args = parser.parse_args(argv)
 
@@ -93,6 +96,9 @@ def main(argv=None):
         asyncio.run(cmd_crawl(cfg, args.catalog or list(cfg.catalogs)))
     elif args.command == "probe":
         asyncio.run(cmd_probe(cfg, args.catalog or cfg.catalogs[0], args.item))
+    elif args.command == "probe-show":
+        from .probe import show
+        show(args.folder)
     elif args.command == "status":
         conn = db.connect(cfg.db_path)
         print("\n".join(status_lines(conn)))

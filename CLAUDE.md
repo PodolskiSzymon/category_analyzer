@@ -61,9 +61,16 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `pagination`, z `price_to` włącznie i wyłącznie, ponowne przejście (zmiana ceny, rezerwacja, zniknięcie →
   `gone_pending` po 2 przejściach, powrót), cena z liczbą ofert > limit (oversize), wznawianie po błędach.
   Atrapa 50 tys. ofert: wszystkie zebrane, 653 zapytania (minimum 521), drugie przejście 575.
-* **Założenia do potwierdzenia probe** (domyślne wartości w kodzie): limit 960 wyników (`ANALYZER_MAX_RESULTS`),
-  pola pozycji katalogu (`brand_title`, `status`, `is_reserved`, `favourite_count`, `total_item_price`, `photo`),
-  `pagination.total_entries`, granice cen. Sortowanie `newest_first` (jedyne sprawdzone).
+* **Probe u użytkownika 2026-10-11 (laptopy 3580)**: `pagination` jest: `current_page, per_page, time,
+  total_entries, total_pages`; **limit = 960 wyników / 10 stron po 96** (`total_entries` jest UCIĘTE do 960 –
+  nie mówi, ile ofert jest naprawdę; `page=20` → HTTP 400). Użytkownik potwierdził w przeglądarce: 10 stron.
+  **`price_from` i `price_to` są włącznie** (zapytanie [665.98; 665.98] = 32 oferty z dokładnie tą ceną).
+  Pola pozycji: `content_source, favourite_count, id, is_favourite, item_box, photo, photos, price, promoted,
+  search_tracking_params, service_fee, show_1st_time_seller_discount, title, total_item_price, url, user,
+  view_count` – **brak `brand_title`, `status`, `is_reserved`** (marka/stan prawdopodobnie w `item_box` – czeka na
+  `probe-show`). Niewyjaśnione: zapytanie [665.98; 666.98] zwróciło 49 ofert z `price` spoza zakresu (`probe-show`
+  [C] pokaże ich ceny). `favourite_count`/`view_count` → ostatnia wartość w `listings` (migracja v2), nie nowy wiersz
+  `observations`. Sortowanie `newest_first` (jedyne sprawdzone).
 * **Następne**: fixtures z probe → poprawki parsera/limitu → pierwsze pełne `crawl` u użytkownika → etap 2
   (`resolver.py`, `details.py` – resolver potrzebuje odpowiedzi sidebar dla USUNIĘTEJ oferty: `probe --item ID`).
 
