@@ -253,6 +253,11 @@ Proxy, nagłówki, klucz AI – wspólne ze Sniperem (`SNIPER_PROXY_*`, `SNIPER_
 
 ## 12. Etapy i kryteria ukończenia
 
+Stan 2026-10-11: etap 1 napisany (+ `diff.py` z etapu 2 i `probe.py` do etapu 0), testy na atrapie przechodzą;
+etap 0 czeka na uruchomienie `python -m analyzer probe` u użytkownika. Odstępstwa od planu wyżej: planer nie robi
+osobnych zapytań „ile ofert” – używa `total_entries` z 1. strony partycji, którą i tak pobiera; partycje dzielą
+granicę ([lo, mid] + [mid, hi]) zamiast nakładać się o 0,01 zł; sortowanie `newest_first` (jedyne sprawdzone).
+
 | Etap | Zakres | Gotowe, gdy |
 |---|---|---|
 | 0 | cURL katalogu + odpowiedzi od użytkownika → fixtures, odpowiedzi na „⚠” | wiadomo: `total_entries`, limit stron, pola pozycji, zachowanie granic cen, odpowiedź dla usuniętej oferty |

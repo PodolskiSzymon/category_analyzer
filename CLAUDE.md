@@ -1,6 +1,7 @@
 # Category Analyzer – kontekst projektu (dla nowej rozmowy z Claude)
 
-Stan na 2026-10-11. **Nowy projekt, kod analizatora jeszcze NIE istnieje** – to repo jest kopią
+Stan na 2026-10-11. **Etap 1 napisany i przetestowany na atrapie (bez sieci), czeka na etap 0 u użytkownika**
+(`python -m analyzer probe` → wkleić `data/probe/<czas>/summary.txt` + pliki JSON). To repo jest kopią
 `PodolskiSzymon/unreachable_sniper` (gałąź `claude/epic-darwin-evl0s1`, commit `1ddb11b`), żeby nowy program mógł
 korzystać z gotowych, sprawdzonych na żywo modułów Snipera (sesja Vinted przez proxy, ekstrakcja ofert, ocena AI).
 Szczegóły Snipera: **`sniper/CONTEXT.md`** (pełny kontekst tamtego projektu – czytaj przy pracy z modułami `sniper/`).
@@ -46,6 +47,26 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   i nie jest widoczna). W raportach traktować jako górną granicę.
 * Dane (`data/`) i `.env` nigdy w repo. Nie commitować sekretów.
 
+## Stan prac (2026-10-11)
+
+* **Zrobione (`analyzer/`)**: `config.py` (ANALYZER_*), `db.py` (schemat z ARCHITEKTURA.md + `photo_ts`,
+  `last_run_id`, `missed_runs`, partycje `active/oversize/done_run_id`; migracje `PRAGMA user_version`, WAL),
+  `rawstore.py` (zstd albo zlib), `catalog.py` (zapytanie = `sniper.config.get_catalog_params`, parser odporny na brak
+  pól, sprzedawca wycięty z `raw`, hash sprzedawcy tylko z `ANALYZER_SELLER_SALT`), `partition.py` (podział po
+  medianie cen, wspólne granice sąsiednich partycji), `crawler.py` (planowanie w trakcie crawlowania: strona 1 podaje
+  `total_entries` → za duża partycja dzielona; bez `total_entries` – przepełnienie = pełna ostatnia dozwolona strona;
+  wznawianie przerwanego przejścia; 429 → przerwa), `diff.py` (migawka: `missed_runs`, `gone_pending`; oferty
+  w partycjach oversize pomijane), `probe.py` (etap 0), CLI `probe | crawl | status`.
+* **Testy**: `analyzer/tests` – 17 testów (w tym probe na atrapie HTTP), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
+  `pagination`, z `price_to` włącznie i wyłącznie, ponowne przejście (zmiana ceny, rezerwacja, zniknięcie →
+  `gone_pending` po 2 przejściach, powrót), cena z liczbą ofert > limit (oversize), wznawianie po błędach.
+  Atrapa 50 tys. ofert: wszystkie zebrane, 653 zapytania (minimum 521), drugie przejście 575.
+* **Założenia do potwierdzenia probe** (domyślne wartości w kodzie): limit 960 wyników (`ANALYZER_MAX_RESULTS`),
+  pola pozycji katalogu (`brand_title`, `status`, `is_reserved`, `favourite_count`, `total_item_price`, `photo`),
+  `pagination.total_entries`, granice cen. Sortowanie `newest_first` (jedyne sprawdzone).
+* **Następne**: fixtures z probe → poprawki parsera/limitu → pierwsze pełne `crawl` u użytkownika → etap 2
+  (`resolver.py`, `details.py` – resolver potrzebuje odpowiedzi sidebar dla USUNIĘTEJ oferty: `probe --item ID`).
+
 ## Za co wziąć się najpierw (kolejność dla nowego czatu)
 
 0. **Przed pisaniem crawlera – dane od użytkownika** (bez nich nie zgadujemy):
@@ -66,16 +87,16 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
 4. **Etap 4 – analiza i raporty** (`stats.py`, `report.py`): mediany, rozkłady czasu sprzedaży, eksport CSV/HTML.
 5. **Etap 5 – integracja ze Sniperem** (patrz `ARCHITEKTURA.md`, sekcja „Integracja ze Sniperem”).
 
-## Uruchomienie (docelowo – jeszcze nie istnieje)
+## Uruchomienie
 
 ```bash
-pip install -r sniper/requirements.txt          # te same biblioteki + ewentualnie zstandard, Pillow/imagehash
-cp sniper/.env.example sniper/.env              # proxy IPRoyal itd. (ten sam .env co w Sniperze)
-python -m analyzer crawl --catalog 3580         # pełne przejście kategorii -> data/analyzer.db
-python -m analyzer resolve                      # znikające oferty: sprzedana / usunięta
-python -m analyzer extract                      # parametry (regex + AI)
-python -m analyzer report                       # raporty -> data/reports/
+pip install -r sniper/requirements.txt          # te same biblioteki (+ opcjonalnie: pip install zstandard)
+cp sniper/.env.example sniper/.env              # proxy IPRoyal itd. (ten sam .env co w Sniperze, sekcja ANALYZER_*)
+python -m analyzer probe --catalog 3580 [--item ID_USUNIETEJ]   # etap 0 -> data/probe/<czas>/
+python -m analyzer crawl --catalog 3580         # pełne przejście kategorii -> data/analyzer.db (wznawia przerwane)
+python -m analyzer status                       # podsumowanie bazy
 python -m pytest analyzer/tests sniper/tests    # testy bez sieci
+# jeszcze nie istnieją: resolve (etap 2), extract (etap 3), report (etap 4)
 ```
 
 ## Moduły Snipera do ponownego użycia (bez zmian w ich zachowaniu)
