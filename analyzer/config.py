@@ -56,14 +56,18 @@ class AnalyzerConfig:
     initial_partitions: int = _env_int("ANALYZER_INITIAL_PARTITIONS", 8)
     # Partycja węższa niż tyle zł nie jest już dzielona po cenie (potrzebna druga oś - marka/stan, później).
     min_width: float = _env_float("ANALYZER_MIN_WIDTH", 1.0)
-    # Zapas (zł) dokładany do granic zapytania - filtr Vinted nie pokrywa się co do grosza z `price` (probe).
-    price_margin: float = _env_float("ANALYZER_PRICE_MARGIN", 1.0)
+    # Zapas (zł) dokładany do granic zapytania. Domyślnie 0: filtr Vinted działa na swojej cenie (nie zawsze = `price`),
+    # ale sąsiednie partycje dzielą granicę włącznie, więc każda oferta i tak trafia do którejś z nich. Zapas 1 zł
+    # w 1. przejściu (2026-10-11) dawał tylko duplikaty na okrągłych cenach.
+    price_margin: float = _env_float("ANALYZER_PRICE_MARGIN", 0.0)
     order: str = _env("ANALYZER_ORDER", "newest_first")   # jedyne sprawdzone na żywo sortowanie
     # Aktywna oferta niewidoczna w katalogu (unlisted) / zarezerwowana / ukryta - ponowne sprawdzenie co tyle dni.
     recheck_days: float = _env_float("ANALYZER_RECHECK_DAYS", 3.0)
     gone_after_runs: int = _env_int("ANALYZER_GONE_AFTER_RUNS", 2)
     # Sól do hasha sprzedawcy (RODO). Pusta = hash sprzedawcy nie jest zapisywany wcale.
     seller_salt: str = _env("ANALYZER_SELLER_SALT")
+    # Tryb `watch`: odstęp między startami pełnych przejść (godziny, zakres „od-do” - losowo).
+    watch_hours: tuple = field(default_factory=lambda: parse_range(_env("ANALYZER_WATCH_HOURS"), (10.0, 14.0)))
     # Niedokończone przejście młodsze niż tyle godzin jest wznawiane zamiast zaczynane od nowa.
     resume_hours: float = _env_float("ANALYZER_RESUME_HOURS", 24.0)
 

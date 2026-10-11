@@ -377,3 +377,16 @@ def test_resolve_flow_sold_deleted_unlisted():
     market.items[1002] = 900.0                     # niewidoczna wróciła do katalogu
     crawl(make_cfg(), market, conn)
     assert conn.execute("SELECT state FROM listings WHERE id=1002").fetchone()[0] == "active"
+
+
+def test_coverage_check_reports_missing():
+    from analyzer.__main__ import coverage_lines
+
+    market = FakeMarket(market_prices(3000, seed=6))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    assert "brakuje łącznie ~0 ofert" in coverage_lines(conn)[0]
+    with conn:   # symulacja zgubionych ofert: usuwamy 5 z bazy
+        conn.execute("DELETE FROM observations WHERE listing_id IN (SELECT id FROM listings LIMIT 5)")
+        conn.execute("DELETE FROM raw")
+        conn.execute("DELETE FROM listings WHERE id NOT IN (SELECT listing_id FROM observations)")
+    assert "brakuje łącznie ~5 ofert" in coverage_lines(conn, tolerance=0.0)[0]

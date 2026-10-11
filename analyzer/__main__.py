@@ -3,6 +3,7 @@
   probe  --catalog 3580 [--item ID ...]   etap 0: odpowiedzi Vinted do sprawdzenia założeń -> data/probe/
   crawl  --catalog 3580                   pełne przejście kategorii -> data/analyzer.db (wznawia przerwane)
   probe-show [folder]                     wyciąg z plików probe do wklejenia (bez sieci)
+  watch  [--catalog 3580]                 bez końca: crawl + resolve co 10-14 h (ANALYZER_WATCH_HOURS)
   resolve [--limit N]                     zniknięte z katalogu -> sold / deleted / unlisted (1 zapytanie/ofertę)
   status                                  podsumowanie bazy (oferty, stany, partycje, przejścia, transfer)
 """
@@ -49,6 +50,35 @@ async def cmd_crawl(cfg, catalogs):
         conn.close()
 
 
+async def cmd_watch(cfg, catalogs, resolve_limit):
+    """Bez końca: pełne przejście każdej kategorii + resolve, potem przerwa ANALYZER_WATCH_HOURS (losowo)."""
+    import random
+
+    from .crawler import Crawler
+    from .resolver import resolve
+
+    while True:
+        conn = db.connect(cfg.db_path)
+        session = build_session()
+        try:
+            crawler = Crawler(cfg, session, conn)
+            for catalog_id in catalogs:
+                await crawler.run(catalog_id)
+            await resolve(cfg, session, conn, resolve_limit)
+            log.info("[TRANSFER] %s", session.traffic.window_report()[0])
+            for line in status_lines(conn):
+                log.info("[STATUS] %s", line)
+        except Exception:
+            log.exception("[WATCH] Przejście przerwane błędem - spróbuję przy następnym cyklu.")
+        finally:
+            await session.close()
+            conn.close()
+        hours = random.uniform(*cfg.watch_hours)
+        log.info("[WATCH] Następne przejście za %.1f h (Ctrl+C = koniec; przerwane przejście zostanie wznowione).",
+                 hours)
+        await asyncio.sleep(hours * 3600)
+
+
 async def cmd_resolve(cfg, limit):
     from .resolver import resolve
 
@@ -72,6 +102,35 @@ async def cmd_probe(cfg, catalog_id, items):
         await session.close()
 
 
+def coverage_lines(conn, tolerance=1.0):
+    """Kontrola kompletności: dla każdej partycji ile ofert z bazy (cena z ostatniej obserwacji ± tolerancja) vs
+    total_entries z Vinted. Braki > 0 = oferty, których nie zebraliśmy (albo cena filtra Vinted ≠ cena oferty)."""
+    lines = []
+    rows = conn.execute("SELECT * FROM partitions WHERE active=1 AND last_total IS NOT NULL ORDER BY catalog_id, "
+                        "price_from").fetchall()
+    by_catalog = {}
+    for row in rows:
+        hi = row["price_to"] + tolerance if row["price_to"] is not None else 1e12
+        have = conn.execute(
+            """SELECT COUNT(*) FROM listings l WHERE l.catalog_id=? AND l.last_run_id=? AND
+                 (SELECT price FROM observations o WHERE o.listing_id=l.id ORDER BY seen_at DESC LIMIT 1)
+                 BETWEEN ? AND ?""",
+            (row["catalog_id"], row["done_run_id"], row["price_from"] - tolerance, hi)).fetchone()[0]
+        stats = by_catalog.setdefault(row["catalog_id"], {"parts": 0, "short": 0, "missing": 0, "worst": []})
+        stats["parts"] += 1
+        if have < row["last_total"]:
+            stats["short"] += 1
+            stats["missing"] += row["last_total"] - have
+            stats["worst"].append((row["last_total"] - have, row["price_from"], row["price_to"], row["last_total"], have))
+    for catalog_id, st in by_catalog.items():
+        lines.append(f"kategoria {catalog_id}: kontrola pokrycia - partycji z brakami {st['short']}/{st['parts']}, "
+                     f"brakuje łącznie ~{st['missing']} ofert (tolerancja ceny ±{tolerance:g} zł)")
+        for miss, lo, hi, total, have in sorted(st["worst"], reverse=True)[:5]:
+            lines.append(f"    {lo:g}-{'∞' if hi is None else format(hi, 'g')} zł: Vinted {total}, w bazie {have} "
+                         f"(brak {miss})")
+    return lines
+
+
 def status_lines(conn):
     lines = []
     for row in conn.execute("SELECT catalog_id, state, COUNT(*) AS n FROM listings GROUP BY catalog_id, state "
@@ -88,7 +147,9 @@ def status_lines(conn):
                      f"{row['finished_at'] or '(niedokończone)'}, zapytań {row['requests']}, "
                      f"{(row['bytes'] or 0) / 1024 / 1024:.2f} MB, widziane {row['seen']}, nowe {row['new_ids']}, "
                      f"zmienione {row['changed']}, zniknięte {row['gone']}, błędy {row['errors']}")
-    return lines or ["Baza pusta - uruchom: python -m analyzer crawl"]
+    if not lines:
+        return ["Baza pusta - uruchom: python -m analyzer crawl"]
+    return lines + coverage_lines(conn)
 
 
 def main(argv=None):
@@ -96,6 +157,9 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     p_crawl = sub.add_parser("crawl", help="pełne przejście kategorii")
     p_crawl.add_argument("--catalog", type=int, action="append", help="catalog_id (domyślnie ANALYZER_CATALOGS)")
+    p_watch = sub.add_parser("watch", help="bez końca: crawl + resolve co ANALYZER_WATCH_HOURS (domyślnie 10-14 h)")
+    p_watch.add_argument("--catalog", type=int, action="append")
+    p_watch.add_argument("--resolve-limit", type=int, default=None)
     p_resolve = sub.add_parser("resolve", help="etap 2: zniknięte oferty -> sprzedana / usunięta / niewidoczna")
     p_resolve.add_argument("--limit", type=int, default=None, help="najwyżej tyle ofert w jednym uruchomieniu")
     p_probe = sub.add_parser("probe", help="etap 0: zapis odpowiedzi Vinted do sprawdzenia założeń")
@@ -110,6 +174,8 @@ def main(argv=None):
     setup_logging(cfg.db_path)
     if args.command == "crawl":
         asyncio.run(cmd_crawl(cfg, args.catalog or list(cfg.catalogs)))
+    elif args.command == "watch":
+        asyncio.run(cmd_watch(cfg, args.catalog or list(cfg.catalogs), args.resolve_limit))
     elif args.command == "resolve":
         asyncio.run(cmd_resolve(cfg, args.limit))
     elif args.command == "probe":

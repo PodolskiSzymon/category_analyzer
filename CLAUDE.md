@@ -57,7 +57,7 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `total_entries` → za duża partycja dzielona; bez `total_entries` – przepełnienie = pełna ostatnia dozwolona strona;
   wznawianie przerwanego przejścia; 429 → przerwa), `diff.py` (migawka: `missed_runs`, `gone_pending`; oferty
   w partycjach oversize pomijane), `probe.py` (etap 0), CLI `probe | crawl | status`.
-* **Testy**: `analyzer/tests` – 24 testy (w tym resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
+* **Testy**: `analyzer/tests` – 25 testów (w tym kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
   `pagination`, z `price_to` włącznie i wyłącznie, ponowne przejście (zmiana ceny, rezerwacja, zniknięcie →
   `gone_pending` po 2 przejściach, powrót), cena z liczbą ofert > limit (oversize), wznawianie po błędach.
   Atrapa 50 tys. ofert: wszystkie zebrane, 653 zapytania (minimum 521), drugie przejście 575.
@@ -85,7 +85,16 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   zostaje `gone_pending`. Surowa odpowiedź w `raw` (kind `resolve`, dane sprzedawcy wycięte). Uwaga do statystyk:
   oferty z PIERWSZEGO przejścia mają `first_seen` ≠ data wystawienia (zaniżony czas sprzedaży) – w raportach brać
   tylko oferty, które pojawiły się po pierwszym przejściu. `details.py` (opis raz na ofertę) – jeszcze nie.
-* **Następne**: pierwsze pełne `crawl` u użytkownika → kolejne przejścia (np. 2×/dobę) + `resolve` → etap 3.
+* **Pierwsze pełne przejście u użytkownika (2026-10-11, laptopy 3580)**: 42 min, 535 zapytań, 20,1 MB
+  (śr. 38,6 KB/stronę, wysłane nagłówki 1,6 MB), **34 159 unikalnych ofert**, 75 partycji (oversize 0), jeden
+  `SSLError bad record mac` (proxy) – ponowione samo. Suma `total_entries` partycji 41 244 > unikalne: duplikaty na
+  wspólnych granicach + zapas 1 zł przy cenach skupionych na okrągłych kwotach (atrapa z takim rozkładem: to samo,
+  0 zgubionych) → `ANALYZER_PRICE_MARGIN` domyślnie 0; `status` pokazuje kontrolę pokrycia per partycja (oferty
+  w bazie z ceną w zakresie ±1 zł vs `total_entries`). Rozkład: 0–2500 zł gęsto (partycje po kilka–kilkadziesiąt zł),
+  >20 000 zł 22 oferty. Kolejne przejścia bez dzielenia ≈ 470 zapytań.
+* **Tryb `watch`** (`python -m analyzer watch`): bez końca crawl + resolve, przerwa `ANALYZER_WATCH_HOURS` (10–14 h).
+* **Następne**: drugie/trzecie przejście + `resolve` u użytkownika (pierwsze sprzedane) → `details.py` (opis raz
+  na ofertę, do ekstrakcji parametrów) → etap 3.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
 
@@ -142,6 +151,7 @@ python -m analyzer crawl --catalog 3580         # pełne przejście kategorii ->
 python -m analyzer status                       # podsumowanie bazy
 python -m pytest analyzer/tests sniper/tests    # testy bez sieci
 python -m analyzer resolve [--limit N]          # zniknięte z katalogu -> sold / deleted / unlisted
+python -m analyzer watch                        # bez końca: crawl + resolve co 10-14 h
 # jeszcze nie istnieją: extract (etap 3), report (etap 4)
 ```
 
