@@ -161,7 +161,7 @@ _OBSERVED = ("price", "total_price", "is_reserved", "favourite_count")
 # aktualizujemy w listings (ostatnia wartość przed zniknięciem oferty = „popyt” w chwili sprzedaży).
 _PRICE_STATUS = ("price", "total_price", "is_reserved")
 # Stany, z których oferta wraca do active/reserved, gdy znów pojawi się w katalogu.
-_REVIVABLE = "('active', 'reserved', 'gone_pending', 'hidden')"
+_REVIVABLE = "('active', 'reserved', 'gone_pending', 'hidden', 'unlisted')"
 
 
 def upsert_item(conn, item, run_id, seen_at):

@@ -183,7 +183,8 @@ Po każdym pełnym przejściu (migawka = zbiór ID widzianych w tym przebiegu):
 * `plugins.item_status.item_closing_action == "sold"` → `sold` (sprawdzone na żywo – fixture `sidebar_sold`),
   `sold_price` = ostatnia cena z `observations`, `days_to_sell` = czas od `created_at` (⚠) albo `first_seen`.
 * rezerwacja (`is_reserved`) → `reserved`, sprawdzić ponownie później.
-* ⚠ oferta usunięta / ukryta – jaki status HTTP/treść (404? `code` != 0?) – do ustalenia na prawdziwym przykładzie.
+* oferta usunięta → **HTTP 404, `code` 104** (sprawdzone u użytkownika 2026-10-11) → `deleted`; aktywna, ale
+  niewidoczna w katalogu → `unlisted` (ponowne sprawdzenie co kilka dni).
 * Ponowne wystawienie (ta sama oferta pod nowym ID) – etap `photos`: miniatura (kilka KB) + pHash, porównanie
   z ofertami tego samego „modelu” w oknie czasu → `relist_of`. Bez tego `days_to_sell` bywa zaniżone.
 

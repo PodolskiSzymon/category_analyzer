@@ -130,11 +130,12 @@ class Probe:
             self.note(f"\n[4] sidebar {item_id}: HTTP {status}, code={code}, klucze: "
                       f"{', '.join(body) if isinstance(body, dict) else type(body).__name__}")
             if isinstance(body, dict):
-                from sniper.extractor import get_plugin, inactive_reason, unwrap_sidebar
+                from sniper.extractor import get_plugin, unwrap_sidebar
                 sidebar = unwrap_sidebar(body)
                 status_plugin = {k: v for k, v in get_plugin(sidebar, "item_status").items() if k != "seller_id"}
                 self.note(f"    item_status: {json.dumps(status_plugin, ensure_ascii=False)}")
-                self.note(f"    rozpoznany stan (sniper.extractor.inactive_reason): {inactive_reason(sidebar) or 'aktywna'}")
+                from .resolver import classify
+                self.note(f"    rozpoznany stan (resolver.classify): {classify(status, body)}")
             await asyncio.sleep(2.0)
         return self.finish()
 

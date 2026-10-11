@@ -3,6 +3,7 @@
   probe  --catalog 3580 [--item ID ...]   etap 0: odpowiedzi Vinted do sprawdzenia założeń -> data/probe/
   crawl  --catalog 3580                   pełne przejście kategorii -> data/analyzer.db (wznawia przerwane)
   probe-show [folder]                     wyciąg z plików probe do wklejenia (bez sieci)
+  resolve [--limit N]                     zniknięte z katalogu -> sold / deleted / unlisted (1 zapytanie/ofertę)
   status                                  podsumowanie bazy (oferty, stany, partycje, przejścia, transfer)
 """
 import argparse
@@ -48,6 +49,19 @@ async def cmd_crawl(cfg, catalogs):
         conn.close()
 
 
+async def cmd_resolve(cfg, limit):
+    from .resolver import resolve
+
+    conn = db.connect(cfg.db_path)
+    session = build_session()
+    try:
+        await resolve(cfg, session, conn, limit)
+        log.info("[TRANSFER] %s", session.traffic.window_report()[0])
+    finally:
+        await session.close()
+        conn.close()
+
+
 async def cmd_probe(cfg, catalog_id, items):
     from .probe import Probe
 
@@ -82,6 +96,8 @@ def main(argv=None):
     sub = parser.add_subparsers(dest="command", required=True)
     p_crawl = sub.add_parser("crawl", help="pełne przejście kategorii")
     p_crawl.add_argument("--catalog", type=int, action="append", help="catalog_id (domyślnie ANALYZER_CATALOGS)")
+    p_resolve = sub.add_parser("resolve", help="etap 2: zniknięte oferty -> sprzedana / usunięta / niewidoczna")
+    p_resolve.add_argument("--limit", type=int, default=None, help="najwyżej tyle ofert w jednym uruchomieniu")
     p_probe = sub.add_parser("probe", help="etap 0: zapis odpowiedzi Vinted do sprawdzenia założeń")
     p_probe.add_argument("--catalog", type=int, default=None)
     p_probe.add_argument("--item", type=int, action="append", default=[], help="ID oferty do details/sidebar")
@@ -94,6 +110,8 @@ def main(argv=None):
     setup_logging(cfg.db_path)
     if args.command == "crawl":
         asyncio.run(cmd_crawl(cfg, args.catalog or list(cfg.catalogs)))
+    elif args.command == "resolve":
+        asyncio.run(cmd_resolve(cfg, args.limit))
     elif args.command == "probe":
         asyncio.run(cmd_probe(cfg, args.catalog or cfg.catalogs[0], args.item))
     elif args.command == "probe-show":

@@ -11,6 +11,7 @@ czeka na etap 0 – `python -m analyzer probe` u użytkownika (potwierdzenie lim
 ```bash
 python -m analyzer probe --catalog 3580     # etap 0: odpowiedzi Vinted -> data/probe/
 python -m analyzer crawl --catalog 3580     # pełne przejście kategorii -> data/analyzer.db
+python -m analyzer resolve                  # zniknięte oferty: sprzedana / usunięta
 python -m analyzer status
 ```
 

@@ -59,6 +59,8 @@ class AnalyzerConfig:
     # Zapas (zł) dokładany do granic zapytania - filtr Vinted nie pokrywa się co do grosza z `price` (probe).
     price_margin: float = _env_float("ANALYZER_PRICE_MARGIN", 1.0)
     order: str = _env("ANALYZER_ORDER", "newest_first")   # jedyne sprawdzone na żywo sortowanie
+    # Aktywna oferta niewidoczna w katalogu (unlisted) / zarezerwowana / ukryta - ponowne sprawdzenie co tyle dni.
+    recheck_days: float = _env_float("ANALYZER_RECHECK_DAYS", 3.0)
     gone_after_runs: int = _env_int("ANALYZER_GONE_AFTER_RUNS", 2)
     # Sól do hasha sprzedawcy (RODO). Pusta = hash sprzedawcy nie jest zapisywany wcale.
     seller_salt: str = _env("ANALYZER_SELLER_SALT")

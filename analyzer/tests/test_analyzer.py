@@ -312,3 +312,68 @@ def test_query_is_widened_by_margin():
     assert widen(100.0, 200.0, 1.0) == (99.0, 201.0)
     assert widen(0.0, 50.0, 1.0) == (0.0, 51.0)
     assert widen(20000.0, None, 1.0) == (19999.0, None)
+
+
+# ------------------------------------------------------------------ resolver (etap 2)
+
+SNIPER_FIXTURES = json.load(open(__import__("pathlib").Path(__file__).resolve().parents[2] / "sniper" / "tests" /
+                                 "fixtures.json", encoding="utf-8"))
+# Prawdziwa odpowiedź dla usuniętej oferty (10327664119, probe 2026-10-11): HTTP 404, klucze code/message/message_code.
+DELETED_BODY = {"code": 104, "message": "Not found", "message_code": "not_found"}
+
+
+def test_classify_real_responses():
+    from analyzer.resolver import classify
+
+    assert classify(200, SNIPER_FIXTURES["sidebar_sold"])[0] == "sold"
+    assert classify(200, SNIPER_FIXTURES["sidebar_active"])[0] == "unlisted"
+    assert classify(404, DELETED_BODY)[0] == "deleted"
+    assert classify(404, {"code": 999})[0] is None          # nieznane - zostaje gone_pending
+    assert classify(500, {})[0] is None
+    reserved = json.loads(json.dumps(SNIPER_FIXTURES["sidebar_active"]))
+    reserved["is_reserved"] = True
+    assert classify(200, reserved)[0] == "reserved"
+
+
+def test_resolve_flow_sold_deleted_unlisted():
+    from sniper.session import VintedSession
+    from analyzer.resolver import resolve
+
+    market = FakeMarket(market_prices(3000, seed=5))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    sold = dict(SNIPER_FIXTURES["sidebar_sold"], price={"amount": "777.0", "currency_code": "PLN"})
+    responses = {1000: (200, sold), 1001: (404, DELETED_BODY), 1002: (200, SNIPER_FIXTURES["sidebar_active"]),
+                 1003: (404, {"code": 1})}
+    for item_id in responses:
+        del market.items[item_id]
+    crawl(make_cfg(), market, conn)
+    crawl(make_cfg(), market, conn)
+    assert conn.execute("SELECT COUNT(*) FROM listings WHERE state='gone_pending'").fetchone()[0] == 4
+
+    def handler(request):
+        item_id = int(request.url.path.split("/")[4])
+        status, body = responses[item_id]
+        return httpx.Response(status, json=body)
+
+    async def go():
+        session = VintedSession(proxy_url=None)
+        await session.client.aclose()
+        session.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            return await resolve(make_cfg(), session, conn, sleep=no_sleep)
+        finally:
+            await session.client.aclose()
+
+    counts = asyncio.run(go())
+    assert counts == {"sold": 1, "deleted": 1, "unlisted": 1, "nieznany": 1}
+    rows = {r["id"]: r for r in conn.execute("SELECT * FROM listings WHERE id IN (1000, 1001, 1002, 1003)")}
+    assert rows[1000]["state"] == "sold" and rows[1000]["sold_price"] == 777.0
+    assert rows[1000]["days_to_sell"] is not None and rows[1000]["days_to_sell"] >= 0
+    assert rows[1001]["state"] == "deleted" and rows[1002]["state"] == "unlisted"
+    assert rows[1003]["state"] == "gone_pending"
+    raw = db.get_raw(conn, 1000, "resolve")[0][1]
+    assert "seller_id" not in json.dumps(raw).replace('"seller_id": "<redacted>"', "")   # RODO
+
+    market.items[1002] = 900.0                     # niewidoczna wróciła do katalogu
+    crawl(make_cfg(), market, conn)
+    assert conn.execute("SELECT state FROM listings WHERE id=1002").fetchone()[0] == "active"

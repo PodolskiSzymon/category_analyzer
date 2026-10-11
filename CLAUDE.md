@@ -1,7 +1,7 @@
 # Category Analyzer – kontekst projektu (dla nowej rozmowy z Claude)
 
-Stan na 2026-10-11. **Etap 1 napisany i przetestowany na atrapie (bez sieci), czeka na etap 0 u użytkownika**
-(`python -m analyzer probe` → wkleić `data/probe/<czas>/summary.txt` + pliki JSON). To repo jest kopią
+Stan na 2026-10-11. **Etap 0 zrobiony u użytkownika (probe), etap 1 (crawler) i resolver z etapu 2 napisane
+i przetestowane na atrapie – czeka na pierwsze pełne `crawl` u użytkownika.** To repo jest kopią
 `PodolskiSzymon/unreachable_sniper` (gałąź `claude/epic-darwin-evl0s1`, commit `1ddb11b`), żeby nowy program mógł
 korzystać z gotowych, sprawdzonych na żywo modułów Snipera (sesja Vinted przez proxy, ekstrakcja ofert, ocena AI).
 Szczegóły Snipera: **`sniper/CONTEXT.md`** (pełny kontekst tamtego projektu – czytaj przy pracy z modułami `sniper/`).
@@ -57,7 +57,7 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `total_entries` → za duża partycja dzielona; bez `total_entries` – przepełnienie = pełna ostatnia dozwolona strona;
   wznawianie przerwanego przejścia; 429 → przerwa), `diff.py` (migawka: `missed_runs`, `gone_pending`; oferty
   w partycjach oversize pomijane), `probe.py` (etap 0), CLI `probe | crawl | status`.
-* **Testy**: `analyzer/tests` – 22 testy (w tym probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
+* **Testy**: `analyzer/tests` – 24 testy (w tym resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
   `pagination`, z `price_to` włącznie i wyłącznie, ponowne przejście (zmiana ceny, rezerwacja, zniknięcie →
   `gone_pending` po 2 przejściach, powrót), cena z liczbą ofert > limit (oversize), wznawianie po błędach.
   Atrapa 50 tys. ofert: wszystkie zebrane, 653 zapytania (minimum 521), drugie przejście 575.
@@ -74,11 +74,18 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `service_fee` + `total_item_price` są (dict amount/currency_code). **Filtr ceny nie pokrywa się co do grosza
   z `price`**: price_to=666.98 zwróciło oferty 667.76–667.88 zł (prawdopodobnie przeliczenia walut) → zapytania
   poszerzone o `ANALYZER_PRICE_MARGIN` (1 zł) z obu stron, duplikaty usuwa ID. Transfer: strona 96 ofert ≈ 26 KB
-  (≈ 0,27 KB/ofertę). Sidebar sprzedanej: karta pamięci 9238023547 i laptop 10295873538 (Razer Blade Pro) – HTTP 200, `code` 0, te same klucze co `sidebar_sold` (endpoint wspólny dla kategorii). Drugi probe: [414.59; 415.59] dał 21 ofert z `price` poza zakresem – filtr działa na jakiejś wewnętrznej cenie (waluta sprzedawcy?), ale to NIE gubi ofert: każda oferta trafia do tej partycji, w której leży jej cena „filtrowa”, a partycje pokrywają cały zakres bez dziur. **Brak jeszcze
-  odpowiedzi dla USUNIĘTEJ oferty** (potrzebna do resolvera). favourite_count/view_count → ostatnia wartość
+  (≈ 0,27 KB/ofertę). Sidebar sprzedanej: karta pamięci 9238023547 i laptop 10295873538 (Razer Blade Pro) – HTTP 200, `code` 0, te same klucze co `sidebar_sold` (endpoint wspólny dla kategorii). Drugi probe: [414.59; 415.59] dał 21 ofert z `price` poza zakresem – filtr działa na jakiejś wewnętrznej cenie (waluta sprzedawcy?), ale to NIE gubi ofert: każda oferta trafia do tej partycji, w której leży jej cena „filtrowa”, a partycje pokrywają cały zakres bez dziur. **Usunięta oferta** (długopis 10327664119, usunięty przez użytkownika): sidebar → **HTTP 404, `code` 104**
+  (klucze `code, message, message_code`; strona www: „Page not found”). favourite_count/view_count → ostatnia wartość
   w `listings` (migracja v2). Sortowanie `newest_first` (jedyne sprawdzone).
-* **Następne**: fixtures z probe → poprawki parsera/limitu → pierwsze pełne `crawl` u użytkownika → etap 2
-  (`resolver.py`, `details.py` – resolver potrzebuje odpowiedzi sidebar dla USUNIĘTEJ oferty: `probe --item ID`).
+* **Etap 2 – `resolver.py` (zrobione, test na atrapie)**: `python -m analyzer resolve` – dla `gone_pending` jedno
+  zapytanie sidebar: 200 + `item_closing_action=sold` → `sold` (`sold_price` = cena z sidebara sprzedanej, inaczej
+  ostatnia z katalogu; `days_to_sell` = od `COALESCE(created_at, first_seen)` do `last_seen`), 404 + code 104 →
+  `deleted`, inne zamknięcie → `closed`, `is_reserved` → `reserved`, `is_hidden`/`is_draft` → `hidden`, aktywna →
+  `unlisted` (ponownie po `ANALYZER_RECHECK_DAYS`=3, wraca do `active`, gdy znów w katalogu); nieznana odpowiedź →
+  zostaje `gone_pending`. Surowa odpowiedź w `raw` (kind `resolve`, dane sprzedawcy wycięte). Uwaga do statystyk:
+  oferty z PIERWSZEGO przejścia mają `first_seen` ≠ data wystawienia (zaniżony czas sprzedaży) – w raportach brać
+  tylko oferty, które pojawiły się po pierwszym przejściu. `details.py` (opis raz na ofertę) – jeszcze nie.
+* **Następne**: pierwsze pełne `crawl` u użytkownika → kolejne przejścia (np. 2×/dobę) + `resolve` → etap 3.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
 
@@ -134,7 +141,8 @@ python -m analyzer probe --catalog 3580 [--item ID_USUNIETEJ]   # etap 0 -> data
 python -m analyzer crawl --catalog 3580         # pełne przejście kategorii -> data/analyzer.db (wznawia przerwane)
 python -m analyzer status                       # podsumowanie bazy
 python -m pytest analyzer/tests sniper/tests    # testy bez sieci
-# jeszcze nie istnieją: resolve (etap 2), extract (etap 3), report (etap 4)
+python -m analyzer resolve [--limit N]          # zniknięte z katalogu -> sold / deleted / unlisted
+# jeszcze nie istnieją: extract (etap 3), report (etap 4)
 ```
 
 ## Moduły Snipera do ponownego użycia (bez zmian w ich zachowaniu)
