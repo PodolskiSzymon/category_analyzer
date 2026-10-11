@@ -106,7 +106,12 @@ ALTER TABLE listings ADD COLUMN favourite_count INTEGER;
 ALTER TABLE listings ADD COLUMN view_count INTEGER;
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2]
+# v3: model z item_box (np. „ThinkPad X1 Carbon”) - wypełnia sprzedający, gotowy klucz do grupowania cen.
+SCHEMA_V3 = """
+ALTER TABLE listings ADD COLUMN model TEXT;
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3]
 
 
 def utcnow():
@@ -170,11 +175,11 @@ def upsert_item(conn, item, run_id, seen_at):
     if row is None:
         conn.execute(
             """INSERT INTO listings (id, catalog_id, title, brand, status_label, currency, photo_url, photo_ts,
-                   first_seen, last_seen, last_run_id, state, state_at, seller_hash, favourite_count, view_count)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   first_seen, last_seen, last_run_id, state, state_at, seller_hash, favourite_count, view_count, model)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (item.id, item.catalog_id, item.title, item.brand, item.status_label, item.currency, item.photo_url,
              item.photo_ts, seen_at, seen_at, run_id, item.state, seen_at, item.seller_hash, item.favourite_count,
-             item.view_count))
+             item.view_count, item.model))
         conn.execute("INSERT INTO observations (listing_id, seen_at, price, total_price, is_reserved, favourite_count)"
                      " VALUES (?, ?, ?, ?, ?, ?)", (item.id, seen_at, *obs.values()))
         put_raw(conn, item.id, "catalog", item.raw, seen_at)
@@ -187,11 +192,12 @@ def upsert_item(conn, item, run_id, seen_at):
                currency=COALESCE(?, currency), photo_url=COALESCE(?, photo_url), photo_ts=COALESCE(photo_ts, ?),
                seller_hash=COALESCE(seller_hash, ?),
                favourite_count=COALESCE(?, favourite_count), view_count=COALESCE(?, view_count),
+               model=COALESCE(?, model),
                state_at=CASE WHEN state IN {_REVIVABLE} AND state != ? THEN ? ELSE state_at END,
                state=CASE WHEN state IN {_REVIVABLE} THEN ? ELSE state END
            WHERE id=?""",
         (seen_at, run_id, item.title, item.brand, item.status_label, item.currency, item.photo_url, item.photo_ts,
-         item.seller_hash, item.favourite_count, item.view_count, item.state, seen_at, item.state, item.id))
+         item.seller_hash, item.favourite_count, item.view_count, item.model, item.state, seen_at, item.state, item.id))
     last = last_observation(conn, item.id)
     if last is not None and all(last[k] == obs[k] for k in _PRICE_STATUS):
         return "same"

@@ -56,6 +56,8 @@ class AnalyzerConfig:
     initial_partitions: int = _env_int("ANALYZER_INITIAL_PARTITIONS", 8)
     # Partycja węższa niż tyle zł nie jest już dzielona po cenie (potrzebna druga oś - marka/stan, później).
     min_width: float = _env_float("ANALYZER_MIN_WIDTH", 1.0)
+    # Zapas (zł) dokładany do granic zapytania - filtr Vinted nie pokrywa się co do grosza z `price` (probe).
+    price_margin: float = _env_float("ANALYZER_PRICE_MARGIN", 1.0)
     order: str = _env("ANALYZER_ORDER", "newest_first")   # jedyne sprawdzone na żywo sortowanie
     gone_after_runs: int = _env_int("ANALYZER_GONE_AFTER_RUNS", 2)
     # Sól do hasha sprzedawcy (RODO). Pusta = hash sprzedawcy nie jest zapisywany wcale.

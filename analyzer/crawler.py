@@ -102,7 +102,8 @@ class Crawler:
             before = self._traffic_bytes()
             try:
                 result = await self.fetch(self.session, row["catalog_id"], page, self.cfg.per_page,
-                                          row["price_from"], row["price_to"], self.cfg.order, self.cfg.seller_salt)
+                                          row["price_from"], row["price_to"], self.cfg.order, self.cfg.seller_salt,
+                                          self.cfg.price_margin)
                 self._bump(run_id, requests=1, bytes=self._traffic_bytes() - before)
                 return result
             except RateLimited:

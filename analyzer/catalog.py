@@ -5,6 +5,7 @@ na odpowiedzi z laptopów - parser czyta je ostrożnie (brak = None) i zawsze za
 więc po zebraniu fixtures z `python -m analyzer probe` można dopisać pola wstecz, bez ponownego scrapowania.
 """
 import hashlib
+import re
 from dataclasses import dataclass, field
 
 from sniper.config import CATALOG_ONLY_HEADERS, CATALOG_URL, get_catalog_params
@@ -46,6 +47,7 @@ class CatalogItem:
     currency: str = None
     brand: str = None
     status_label: str = None
+    model: str = None
     photo_url: str = None
     photo_ts: int = None
     is_reserved: int = None
@@ -57,6 +59,28 @@ class CatalogItem:
     @property
     def state(self):
         return "reserved" if self.is_reserved else "active"
+
+
+# item_box.accessibility_label (probe 2026-10-11):
+#   "ThinkPad X1 Carbon 10th, 14\" WUXGA, i5-1245U, Marka: Lenovo, Model: ThinkPad X1 Carbon, Stan: Dobry, 1371.44 zł, 1442.91 zł"
+# Tytuł może mieć przecinki, więc szukamy OSTATNIEGO wystąpienia etykiety (zachłanne ^.*). Model bywa pominięty.
+_LABEL_FIELDS = {
+    "brand": re.compile(r"^.*, Marka: (.+?)(?:, Model: |, Stan: |, \d[\d.,]* zł|$)"),
+    "model": re.compile(r"^.*, Model: (.+?)(?:, Stan: |, \d[\d.,]* zł|$)"),
+    "status": re.compile(r"^.*, Stan: (.+?)(?:, \d[\d.,]* zł|$)"),
+}
+
+
+def parse_item_box(item):
+    """{'brand', 'model', 'status'} z item_box (brak = None). Stan: second_line, a gdy pusty - z etykiety."""
+    box = item.get("item_box") if isinstance(item.get("item_box"), dict) else {}
+    label = box.get("accessibility_label") or ""
+    found = {}
+    for key, pattern in _LABEL_FIELDS.items():
+        match = pattern.search(label)
+        found[key] = match.group(1).strip() if match else None
+    found["status"] = (box.get("second_line") or "").strip() or found["status"]
+    return found
 
 
 def _seller_hash(item, salt):
@@ -84,6 +108,7 @@ def parse_item(item, catalog_id, seller_salt=""):
     currency = price.get("currency_code") if isinstance(price, dict) else item.get("currency")
     favourites = item.get("favourite_count")
     views = item.get("view_count")
+    box = parse_item_box(item)
     return CatalogItem(
         id=int(item["id"]),
         catalog_id=int(item.get("catalog_id") or catalog_id),
@@ -91,8 +116,9 @@ def parse_item(item, catalog_id, seller_salt=""):
         price=to_float(price),
         total_price=to_float(item.get("total_item_price")),
         currency=currency or None,
-        brand=item.get("brand_title") or None,
-        status_label=item.get("status") or None,
+        brand=box["brand"] or item.get("brand_title") or None,
+        status_label=box["status"] or item.get("status") or None,
+        model=box["model"],
         photo_url=photo.get("url") or None,
         photo_ts=high_res.get("timestamp"),
         is_reserved=to_bool(item.get("is_reserved")),
@@ -128,13 +154,25 @@ def parse_page(data, catalog_id, page, per_page, seller_salt=""):
                        page=page, per_page=_int("per_page") or per_page, raw_keys=tuple(data))
 
 
+def widen(price_from, price_to, margin):
+    """Zapytanie szersze o `margin` zł z obu stron. Probe 2026-10-11: filtr ceny Vinted nie pokrywa się dokładnie
+    z polem `price` (price_to=666.98 zwróciło oferty po 667.76-667.88 zł - prawdopodobnie przeliczenia walut),
+    więc nie ufamy granicy co do grosza; nadmiarowe oferty usuwa klucz = ID."""
+    if not margin:
+        return price_from, price_to
+    low = None if price_from is None else max(0.0, price_from - margin)
+    high = None if price_to is None else price_to + margin
+    return low, high
+
+
 def build_params(catalog_id, page, per_page, price_from=None, price_to=None, order="newest_first"):
     return get_catalog_params(category=str(catalog_id), page=page, per_page=per_page, order=order,
                               price_from=fmt_price(price_from), price_to=fmt_price(price_to))
 
 
 async def fetch_page(session, catalog_id, page, per_page, price_from=None, price_to=None, order="newest_first",
-                     seller_salt=""):
+                     seller_salt="", margin=0.0):
+    price_from, price_to = widen(price_from, price_to, margin)
     params = build_params(catalog_id, page, per_page, price_from, price_to, order)
     data = await session.get_json(CATALOG_URL, params=params, referer=CATALOG_REFERER,
                                   extra_headers=CATALOG_ONLY_HEADERS)

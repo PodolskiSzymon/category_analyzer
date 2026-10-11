@@ -109,7 +109,8 @@ def test_single_price_over_limit_is_marked_oversize():
     conn, _, _, complete = crawl(make_cfg(), market)
     assert complete
     oversize = conn.execute("SELECT price_from, price_to FROM partitions WHERE active=1 AND oversize=1").fetchall()
-    assert oversize and all(r[0] <= 999 <= r[1] for r in oversize)
+    # zapytania są szersze o ANALYZER_PRICE_MARGIN (1 zł), więc sąsiednie wąskie partycje też widzą 999 zł
+    assert oversize and all(r[0] - 1 <= 999 <= r[1] + 1 for r in oversize)
     # Oferty spoza oversize - wszystkie; przy 999 zł najwyżej limit wyników.
     others = sum(1 for p in prices if p != 999.0)
     at_999 = conn.execute("SELECT COUNT(*) FROM listings l JOIN observations o ON o.listing_id=l.id "
@@ -272,3 +273,42 @@ def test_counts_update_listing_without_new_observation():
     row = conn.execute("SELECT favourite_count, view_count FROM listings WHERE id=5").fetchone()
     assert tuple(row) == (4, 50)
     assert conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
+
+
+def test_item_box_parsing_real_labels():
+    from analyzer.catalog import parse_item_box
+
+    def box(label, second):
+        return parse_item_box({"item_box": {"accessibility_label": label, "second_line": second}})
+
+    assert box('ThinkPad X1 Carbon 10th, 14" WUXGA, i5-1245U, 16Gb RAM, 256Gb NVMe, Marka: Lenovo, Model: ThinkPad X1 '
+               'Carbon, Stan: Dobry, 1371.44 zł, 1442.91 zł', "Dobry") == {
+        "brand": "Lenovo", "model": "ThinkPad X1 Carbon", "status": "Dobry"}
+    assert box("Laptop Lenovo, Marka: Lenovo, Stan: Bardzo dobry, 270.00 zł, 286.40 zł", "Bardzo dobry") == {
+        "brand": "Lenovo", "model": None, "status": "Bardzo dobry"}
+    assert box("Laptop, Stan: Nowy z metką, 100.00 zł", "") == {"brand": None, "model": None, "status": "Nowy z metką"}
+    assert parse_item_box({}) == {"brand": None, "model": None, "status": None}
+
+
+def test_parse_real_catalog_item():
+    raw = {"id": 10327381899, "title": "Laptop Dell Latitude 3410", "favourite_count": 1, "view_count": 0,
+           "item_box": {"accessibility_label": "Laptop Dell Latitude 3410, Marka: DELL, Model: Latitude 3410, "
+                                               "Stan: Dobry, 510.00 zł, 538.40 zł",
+                        "first_line": "DELL Latitude 3410", "second_line": "Dobry"},
+           "photo": {"url": "https://images1.vinted.net/t/x/f800/dcb8a807.webp", "high_resolution": {"id": "x"}},
+           "price": {"amount": "510.00", "currency_code": "PLN"},
+           "service_fee": {"amount": "28.40", "currency_code": "PLN"},
+           "total_item_price": {"amount": "538.40", "currency_code": "PLN"},
+           "url": "/items/10327381899-laptop-dell-latitude-3410", "user": {"id": 1, "login": "x"}}
+    item = parse_item(raw, 3580)
+    assert (item.brand, item.model, item.status_label) == ("DELL", "Latitude 3410", "Dobry")
+    assert (item.price, item.total_price, item.currency) == (510.0, 538.4, "PLN")
+    assert (item.favourite_count, item.view_count, item.is_reserved, item.photo_ts) == (1, 0, None, None)
+    assert item.state == "active"
+
+
+def test_query_is_widened_by_margin():
+    from analyzer.catalog import widen
+    assert widen(100.0, 200.0, 1.0) == (99.0, 201.0)
+    assert widen(0.0, 50.0, 1.0) == (0.0, 51.0)
+    assert widen(20000.0, None, 1.0) == (19999.0, None)

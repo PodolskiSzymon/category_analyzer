@@ -1,7 +1,7 @@
 """Atrapa katalogu Vinted: syntetyczny „rynek” z limitem wyników, sortowaniem newest_first i filtrem cen."""
 import random
 
-from analyzer.catalog import parse_page
+from analyzer.catalog import parse_page, widen
 
 
 class FakeMarket:
@@ -30,7 +30,9 @@ class FakeMarket:
         chunk = visible[(page - 1) * per_page: page * per_page]
         data = {"items": [{"id": i, "title": f"Laptop {i}", "price": {"amount": f"{self.items[i]:.2f}",
                                                                        "currency_code": "PLN"},
-                           "brand_title": "Lenovo", "status": "Bardzo dobry", "is_reserved": i in self.reserved,
+                           "item_box": {"accessibility_label": f"Laptop {i}, Marka: Lenovo, Stan: Bardzo dobry, "
+                                                               f"{self.items[i]:.2f} zł", "second_line": "Bardzo dobry"},
+                           "is_reserved": i in self.reserved,
                            "user": {"id": i % 7, "login": "ktos"},
                            "photo": {"url": f"https://images1.vinted.net/{i}.webp",
                                      "high_resolution": {"timestamp": 1780000000 + i}}} for i in chunk]}
@@ -40,8 +42,9 @@ class FakeMarket:
         return data
 
     async def fetch(self, session, catalog_id, page, per_page, price_from=None, price_to=None, order="newest_first",
-                    seller_salt=""):
+                    seller_salt="", margin=0.0):
         self.requests.append((price_from, price_to, page))
+        price_from, price_to = widen(price_from, price_to, margin)
         if self.fail and self.fail(price_from, price_to, page):
             raise OSError("atrapa: zerwane połączenie")
         return parse_page(self.response(page, per_page, price_from, price_to), catalog_id, page, per_page, seller_salt)

@@ -57,7 +57,7 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `total_entries` → za duża partycja dzielona; bez `total_entries` – przepełnienie = pełna ostatnia dozwolona strona;
   wznawianie przerwanego przejścia; 429 → przerwa), `diff.py` (migawka: `missed_runs`, `gone_pending`; oferty
   w partycjach oversize pomijane), `probe.py` (etap 0), CLI `probe | crawl | status`.
-* **Testy**: `analyzer/tests` – 17 testów (w tym probe na atrapie HTTP), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
+* **Testy**: `analyzer/tests` – 22 testy (w tym probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
   `pagination`, z `price_to` włącznie i wyłącznie, ponowne przejście (zmiana ceny, rezerwacja, zniknięcie →
   `gone_pending` po 2 przejściach, powrót), cena z liczbą ofert > limit (oversize), wznawianie po błędach.
   Atrapa 50 tys. ofert: wszystkie zebrane, 653 zapytania (minimum 521), drugie przejście 575.
@@ -67,10 +67,16 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   **`price_from` i `price_to` są włącznie** (zapytanie [665.98; 665.98] = 32 oferty z dokładnie tą ceną).
   Pola pozycji: `content_source, favourite_count, id, is_favourite, item_box, photo, photos, price, promoted,
   search_tracking_params, service_fee, show_1st_time_seller_discount, title, total_item_price, url, user,
-  view_count` – **brak `brand_title`, `status`, `is_reserved`** (marka/stan prawdopodobnie w `item_box` – czeka na
-  `probe-show`). Niewyjaśnione: zapytanie [665.98; 666.98] zwróciło 49 ofert z `price` spoza zakresu (`probe-show`
-  [C] pokaże ich ceny). `favourite_count`/`view_count` → ostatnia wartość w `listings` (migracja v2), nie nowy wiersz
-  `observations`. Sortowanie `newest_first` (jedyne sprawdzone).
+  view_count` – brak `brand_title`, `status`, `is_reserved` (rezerwacji z katalogu NIE znamy → `is_reserved` NULL).
+  **Marka / model / stan z `item_box`**: `accessibility_label` = „<tytuł>, Marka: X, Model: Y, Stan: Z, <cena> zł,
+  <cena z opłatą> zł” (Model bywa pominięty), `second_line` = stan, `first_line` = marka + model → `listings.brand`,
+  `model` (migracja v3), `status_label`. `photo.high_resolution` w katalogu NIE ma `timestamp` (→ `photo_ts` NULL).
+  `service_fee` + `total_item_price` są (dict amount/currency_code). **Filtr ceny nie pokrywa się co do grosza
+  z `price`**: price_to=666.98 zwróciło oferty 667.76–667.88 zł (prawdopodobnie przeliczenia walut) → zapytania
+  poszerzone o `ANALYZER_PRICE_MARGIN` (1 zł) z obu stron, duplikaty usuwa ID. Transfer: strona 96 ofert ≈ 26 KB
+  (≈ 0,27 KB/ofertę). Sidebar sprzedanej (9238023547): HTTP 200, `code` 0, jak `sidebar_sold`. **Brak jeszcze
+  odpowiedzi dla USUNIĘTEJ oferty** (potrzebna do resolvera). favourite_count/view_count → ostatnia wartość
+  w `listings` (migracja v2). Sortowanie `newest_first` (jedyne sprawdzone).
 * **Następne**: fixtures z probe → poprawki parsera/limitu → pierwsze pełne `crawl` u użytkownika → etap 2
   (`resolver.py`, `details.py` – resolver potrzebuje odpowiedzi sidebar dla USUNIĘTEJ oferty: `probe --item ID`).
 
