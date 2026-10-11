@@ -1,0 +1,21 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+sniper/.env
+sniper/logs/
+*.log
+
+# Sesja konta (auto-zakup) - NIGDY do repo: nagłówki z tokenami, profil przeglądarki
+sniper/logs/my_headers.txt
+sniper/logs/account_check.html
+sniper/logs/account_profile/
+# Profil przeglądarki bota (Patchright, SCRAPER_PROFILE_DIR) - ciasteczka sesji konta
+profiles/
+my_headers.txt
+
+# Dane analizatora (baza SQLite, raporty, miniatury) - NIGDY do repo
+data/
+*.db
+*.db-wal
+*.db-shm
