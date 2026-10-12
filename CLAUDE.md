@@ -112,6 +112,13 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   budżetowe, Chromebooki, uszkodzone, retro) + parametry wspólne i klucze konfiguracji do grupowania cen;
   sekcja 1a – słownik GPU (prośba użytkownika: profesjonalne NVIDIA RTX A500–A5500 / Ada / Quadro z Delli Precision,
   AMD Radeon RX / Radeon Pro WX/W / Pro 5xxxM z MacBooków, iGPU 680M/780M/890M, Intel Arc) – pro liczone osobno.
+* **Przejścia #3 i #4 + pierwszy resolve/details (2026-10-11/12)**: #3: nowe 232, zmienione 150, zniknięte 16
+  (8 deleted, 8 unlisted). #4: nowe 17, **zmienione 11 810** (!), zniknięte 199 → resolve: deleted 107, unlisted 50,
+  below_min 19, hidden 19, reserved 3, **sold 0** (podejrzane – może sprzedane zostają jakiś czas w katalogu albo
+  znikają jako 404; do obserwacji). Po #4 kontrola pokrycia: brak 473 (798–831 zł: Vinted 816, w bazie 563).
+  Hipoteza: dryf kursów walut (oferty zagraniczne – w resolve dużo tytułów CZ/LT/HU/SE) albo zmiana opłaty →
+  zmiana `price`/`total_price` u wielu ofert. **Do ustalenia `python -m analyzer diag`** (bez sieci) zanim zmienię
+  logikę „zmienione”. Details: ~200 ofert / 13 min (~4 s/ofertę), ReadTimeout co kilkaset (ponawiane w kolejnym cyklu).
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze

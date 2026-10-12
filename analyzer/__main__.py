@@ -6,6 +6,7 @@
   watch  [--catalog 3580]                 bez końca: crawl + resolve, między przejściami details (10-14 h)
   details [--limit N]                     szczegóły ofert (opis, atrybuty, „Dodane”) raz na ofertę
   resolve [--limit N]                     zniknięte z katalogu -> sold / deleted / unlisted (1 zapytanie/ofertę)
+  diag                                    zmiany cen i braki pokrycia w ostatnim przejściu (bez sieci)
   status                                  podsumowanie bazy (oferty, stany, partycje, przejścia, transfer)
 """
 import argparse
@@ -197,6 +198,7 @@ def main(argv=None):
     p_show = sub.add_parser("probe-show", help="wyciąg z zapisanych plików probe (bez sieci)")
     p_show.add_argument("folder", nargs="?", default=None, help="domyślnie najnowszy data/probe/*")
     sub.add_parser("status", help="podsumowanie bazy")
+    sub.add_parser("diag", help="diagnostyka bazy (zmiany cen, braki pokrycia) - bez sieci")
     args = parser.parse_args(argv)
 
     cfg = AnalyzerConfig()
@@ -214,6 +216,11 @@ def main(argv=None):
     elif args.command == "probe-show":
         from .probe import show
         show(args.folder)
+    elif args.command == "diag":
+        from .diag import report
+        conn = db.connect(cfg.db_path)
+        print("\n".join(report(conn)))
+        conn.close()
     elif args.command == "status":
         conn = db.connect(cfg.db_path)
         print("\n".join(status_lines(conn)))

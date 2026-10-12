@@ -512,3 +512,15 @@ def test_fetch_details_respects_deadline():
             await session.client.aclose()
 
     assert asyncio.run(go()) == {"ok": 7}
+
+
+def test_diag_report_runs():
+    from analyzer.diag import report
+
+    market = FakeMarket(market_prices(2000, seed=11))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    for i in list(market.items)[:50]:
+        market.items[i] = round(market.items[i] * 1.003, 2)      # dryf kursu walut
+    crawl(make_cfg(), market, conn)
+    text = "\n".join(report(conn))
+    assert "obserwacji ze zmianą 50" in text and "< 0,5%" in text and "Najgorsza partycja" in text
