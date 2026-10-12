@@ -139,7 +139,12 @@ UPDATE listings SET price_now = (SELECT price FROM observations o WHERE o.listin
                                  ORDER BY seen_at DESC LIMIT 1);
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5]
+# v6: kraj sprzedawcy (kod ISO z pozycji katalogu, jeśli Vinted go podaje) - premia za Polskę, oferty zagraniczne.
+SCHEMA_V6 = """
+ALTER TABLE listings ADD COLUMN seller_country TEXT;
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6]
 
 
 def utcnow():
@@ -231,11 +236,11 @@ def upsert_item(conn, item, run_id, seen_at):
         conn.execute(
             """INSERT INTO listings (id, catalog_id, title, brand, status_label, currency, photo_url, photo_ts,
                    first_seen, last_seen, last_run_id, state, state_at, seller_hash, favourite_count, view_count, model,
-                   price_now, total_now)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   price_now, total_now, seller_country)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (item.id, item.catalog_id, item.title, item.brand, item.status_label, item.currency, item.photo_url,
              item.photo_ts, seen_at, seen_at, run_id, item.state, seen_at, item.seller_hash, item.favourite_count,
-             item.view_count, item.model, item.price, item.total_price))
+             item.view_count, item.model, item.price, item.total_price, item.seller_country))
         conn.execute("INSERT INTO observations (listing_id, seen_at, price, total_price, is_reserved, favourite_count)"
                      " VALUES (?, ?, ?, ?, ?, ?)", (item.id, seen_at, *obs.values()))
         put_raw(conn, item.id, "catalog", item.raw, seen_at)
@@ -248,12 +253,12 @@ def upsert_item(conn, item, run_id, seen_at):
                currency=COALESCE(?, currency), photo_url=COALESCE(?, photo_url), photo_ts=COALESCE(photo_ts, ?),
                seller_hash=COALESCE(seller_hash, ?),
                favourite_count=COALESCE(?, favourite_count), view_count=COALESCE(?, view_count),
-               model=COALESCE(?, model), price_now=?, total_now=?,
+               model=COALESCE(?, model), price_now=?, total_now=?, seller_country=COALESCE(?, seller_country),
                state_at=CASE WHEN state IN {_REVIVABLE} AND state != ? THEN ? ELSE state_at END,
                state=CASE WHEN state IN {_REVIVABLE} THEN ? ELSE state END
            WHERE id=?""",
         (seen_at, run_id, item.title, item.brand, item.status_label, item.currency, item.photo_url, item.photo_ts,
-         item.seller_hash, item.favourite_count, item.view_count, item.model, item.price, item.total_price, item.state, seen_at, item.state, item.id))
+         item.seller_hash, item.favourite_count, item.view_count, item.model, item.price, item.total_price, item.seller_country, item.state, seen_at, item.state, item.id))
     last = last_observation(conn, item.id)
     seller = conn.execute("SELECT seller_currency FROM details WHERE listing_id=?", (item.id,)).fetchone()
     if not real_change(last, obs, seller[0] if seller else None):

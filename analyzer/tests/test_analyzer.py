@@ -556,3 +556,17 @@ def test_fx_drift_updates_price_now_without_observation():
     assert conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
     cut = dict(base, price={"amount": "600.00", "currency_code": "PLN"})
     assert db.upsert_item(conn, parse_item(cut, 3580), 3, "2026-10-13T10:00:00.000+00:00") == "changed"
+
+
+def test_seller_country_kept_personal_data_removed():
+    conn = db.connect(":memory:")
+    raw = {"id": 11, "price": {"amount": "900.00", "currency_code": "PLN"},
+           "user": {"id": 5, "login": "jan", "profile_url": "x", "country_iso_code": "pl", "country_title": "Polska"}}
+    item = parse_item(raw, 3580)
+    assert item.seller_country == "PL"
+    assert item.raw["user"] == {"redacted": True, "country_iso_code": "pl", "country_title": "Polska"}
+    db.upsert_item(conn, item, 1, "2026-10-12T10:00:00.000+00:00")
+    assert conn.execute("SELECT seller_country FROM listings WHERE id=11").fetchone()[0] == "PL"
+    assert parse_item({"id": 12, "user": {"id": 1}}, 3580).seller_country is None
+    assert redact({"user": {"login": "x", "country_code": "LT"}})["user"] == {"redacted": True, "country_code": "LT"}
+    assert redact({"user": {"login": "x"}})["user"] == "<redacted>"

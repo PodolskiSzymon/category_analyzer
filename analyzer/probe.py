@@ -31,9 +31,20 @@ LIMIT_PAGES = (10, 20, 30, 50, 100, 200)
 
 
 def redact(obj):
-    """Rekurencyjnie wycina dane osobowe (RODO) - zostaje sama struktura klucza."""
+    """Rekurencyjnie wycina dane osobowe (RODO) - zostaje sama struktura klucza (i kraj sprzedawcy, jeśli jest)."""
     if isinstance(obj, dict):
-        return {k: ("<redacted>" if k in PERSONAL_KEYS and v is not None else redact(v)) for k, v in obj.items()}
+        out = {}
+        for k, v in obj.items():
+            if k in PERSONAL_KEYS and v is not None:
+                if isinstance(v, dict):
+                    from .catalog import COUNTRY_KEYS
+                    kept = {c: v[c] for c in COUNTRY_KEYS if v.get(c) is not None}
+                    out[k] = {"redacted": True, **kept} if kept else "<redacted>"
+                else:
+                    out[k] = "<redacted>"
+            else:
+                out[k] = redact(v)
+        return out
     if isinstance(obj, list):
         return [redact(v) for v in obj]
     return obj

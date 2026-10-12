@@ -54,6 +54,7 @@ class CatalogItem:
     favourite_count: int = None
     view_count: int = None
     seller_hash: str = None
+    seller_country: str = None
     raw: dict = field(default_factory=dict, repr=False)
 
     @property
@@ -91,11 +92,23 @@ def _seller_hash(item, salt):
     return hashlib.sha256(f"{salt}:{user_id}".encode()).hexdigest()[:24]
 
 
+# Kraj sprzedawcy nie jest daną osobową, a jest potrzebny (premia za Polskę w guidelines, oferty zagraniczne).
+# ⚠ Niepotwierdzone, czy pozycja katalogu svc-catalogue ma te pola w `user` (Sniper czyta je stamtąd z założenia).
+COUNTRY_KEYS = ("country_iso_code", "country_code", "country_title", "country_id")
+
+
+def seller_country(item):
+    user = item.get("user") if isinstance(item.get("user"), dict) else {}
+    code = user.get("country_iso_code") or user.get("country_code")
+    return str(code).upper() if code else None
+
+
 def strip_personal(item):
-    """Kopia pozycji bez danych sprzedawcy (RODO) - tak trafia do tabeli `raw`."""
+    """Kopia pozycji bez danych sprzedawcy (RODO) - tak trafia do tabeli `raw`. Zostaje tylko kraj sprzedawcy."""
     clean = dict(item)
     if isinstance(clean.get("user"), dict):
-        clean["user"] = {"redacted": True}
+        kept = {k: clean["user"][k] for k in COUNTRY_KEYS if clean["user"].get(k) is not None}
+        clean["user"] = {"redacted": True, **kept}
     for key in ("user_id", "user_login"):
         clean.pop(key, None)
     return clean
@@ -125,6 +138,7 @@ def parse_item(item, catalog_id, seller_salt=""):
         favourite_count=int(favourites) if isinstance(favourites, (int, float)) else None,
         view_count=int(views) if isinstance(views, (int, float)) else None,
         seller_hash=_seller_hash(item, seller_salt),
+        seller_country=seller_country(item),
         raw=strip_personal(item),
     )
 

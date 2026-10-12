@@ -92,5 +92,12 @@ def coverage_report(conn, examples=12):
     return lines
 
 
+def country_report(conn):
+    rows = conn.execute("SELECT COALESCE(seller_country, '?') AS c, COUNT(*) AS n FROM listings "
+                        "WHERE state IN ('active','reserved','unlisted') GROUP BY c ORDER BY n DESC LIMIT 10").fetchall()
+    return ["Kraj sprzedawcy (z katalogu; '?' = Vinted nie podał albo oferta sprzed migracji v6): "
+            + ", ".join(f"{r['c']} {r['n']}" for r in rows)]
+
+
 def report(conn):
-    return changes_report(conn) + [""] + coverage_report(conn)
+    return changes_report(conn) + [""] + coverage_report(conn) + [""] + country_report(conn)

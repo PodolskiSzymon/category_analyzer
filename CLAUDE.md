@@ -57,7 +57,7 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `total_entries` → za duża partycja dzielona; bez `total_entries` – przepełnienie = pełna ostatnia dozwolona strona;
   wznawianie przerwanego przejścia; 429 → przerwa), `diff.py` (migawka: `missed_runs`, `gone_pending`; oferty
   w partycjach oversize pomijane), `probe.py` (etap 0), CLI `probe | crawl | status`.
-* **Testy**: `analyzer/tests` – 33 testy (w tym dryf kursów, details, cena minimalna, kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
+* **Testy**: `analyzer/tests` – 34 testy (w tym kraj sprzedawcy, dryf kursów, details, cena minimalna, kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
   `pagination`, z `price_to` włącznie i wyłącznie, ponowne przejście (zmiana ceny, rezerwacja, zniknięcie →
   `gone_pending` po 2 przejściach, powrót), cena z liczbą ofert > limit (oversize), wznawianie po błędach.
   Atrapa 50 tys. ofert: wszystkie zebrane, 653 zapytania (minimum 521), drugie przejście 575.
@@ -112,6 +112,13 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   budżetowe, Chromebooki, uszkodzone, retro) + parametry wspólne i klucze konfiguracji do grupowania cen;
   sekcja 1a – słownik GPU (prośba użytkownika: profesjonalne NVIDIA RTX A500–A5500 / Ada / Quadro z Delli Precision,
   AMD Radeon RX / Radeon Pro WX/W / Pro 5xxxM z MacBooków, iGPU 680M/780M/890M, Intel Arc) – pro liczone osobno.
+  **2026-10-12: obowiązuje wersja użytkownika** (źródła wartości z wagami, zasady „nie zgaduj” dla blokad/usterek/
+  baterii/gwarancji, tabela 1b numer modelu → GPU z mocą zasilacza, flagi informacyjne/czerwone/okazji, sekcja 5 =
+  powiązanie z `sniper/guidelines.md`) z poprawkami Claude (oznaczone): format AI = obiekty {value, source, evidence}
+  + schemat JSON, jedna skala wag, skala `visual_grade` A–D, ⚠ dla pól niewidzianych w danych, kraj sprzedawcy.
+* **Kraj sprzedawcy (migracja v6)**: `listings.seller_country` z `user.country_iso_code|country_code` pozycji
+  katalogu; `strip_personal` / `probe.redact` zostawiają tylko pola kraju (login/ID wycięte). ⚠ niepotwierdzone, czy
+  svc-catalogue podaje kraj w `user` – sprawdzi `diag` (linia „Kraj sprzedawcy”) po pierwszym przejściu.
 * **Przejścia #3 i #4 + pierwszy resolve/details (2026-10-11/12)**: #3: nowe 232, zmienione 150, zniknięte 16
   (8 deleted, 8 unlisted). #4: nowe 17, **zmienione 11 810** (!), zniknięte 199 → resolve: deleted 107, unlisted 50,
   below_min 19, hidden 19, reserved 3, **sold 0** (podejrzane – może sprzedane zostają jakiś czas w katalogu albo
