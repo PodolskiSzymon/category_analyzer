@@ -133,10 +133,11 @@ async def resolve(cfg, session, conn, limit=None, sleep=asyncio.sleep):
             counts["błąd"] = counts.get("błąd", 0) + 1
             continue
         state, reason = classify(status_code, body)
-        if state == "unlisted" and cfg.price_min:
+        low = cfg.price_min_for(row["catalog_id"])
+        if state == "unlisted" and low:
             price = to_float(unwrap_sidebar(body).get("price"))
-            if price is not None and price < cfg.price_min:   # zniknęła z naszego zakresu, bo potaniała
-                state, reason = "below_min", f"cena {price:g} zł < {cfg.price_min:g} zł"
+            if price is not None and price < low:   # zniknęła z naszego zakresu, bo potaniała
+                state, reason = "below_min", f"cena {price:g} zł < {low:g} zł"
         with conn:
             apply_result(conn, row, state, status_code, body, db.utcnow())
         key = state or "nieznany"

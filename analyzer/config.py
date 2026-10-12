@@ -34,8 +34,21 @@ def parse_range(text, default):
     return (min(low, high), max(low, high))
 
 
+# Kategorie Vinted (catalog_id z cURL użytkownika 2026-10-12).
+CATALOG_NAMES = {3580: "laptopy", 3661: "telefony", 3025: "konsole", 3728: "tablety"}
+# Domyślna cena minimalna per kategoria (zł). Laptopy: decyzja użytkownika 2026-10-11 (< 700 zł = starocie).
+# Telefony / konsole / tablety: 300 zł - propozycja Claude (poniżej głównie akcesoria, zepsute i bardzo stare modele);
+# zmiana: ANALYZER_PRICE_MIN_<catalog_id>=..., np. ANALYZER_PRICE_MIN_3025=150.
+DEFAULT_PRICE_MIN = {3580: 700.0, 3661: 300.0, 3025: 300.0, 3728: 300.0}
+
+
+def catalog_label(catalog_id):
+    name = CATALOG_NAMES.get(int(catalog_id))
+    return f"{catalog_id} ({name})" if name else str(catalog_id)
+
+
 def _catalogs():
-    raw = _env("ANALYZER_CATALOGS", "3580")
+    raw = _env("ANALYZER_CATALOGS", ",".join(str(c) for c in CATALOG_NAMES))
     return tuple(int(c) for c in raw.replace(";", ",").split(",") if c.strip())
 
 
@@ -51,9 +64,9 @@ class AnalyzerConfig:
     max_results: int = _env_int("ANALYZER_MAX_RESULTS", 960)
     partition_fill: float = _env_float("ANALYZER_PARTITION_FILL", 0.9)
     # Zakres cen całej kategorii w zł; powyżej price_max jest jedna otwarta partycja „od price_max”.
-    # Laptopy tańsze niż price_min nas nie interesują (decyzja użytkownika 2026-10-11: < 700 zł to zwykle
-    # bezużyteczne starocie) - nie crawlujemy ich i nie śledzimy (stan below_min).
-    price_min: float = _env_float("ANALYZER_PRICE_MIN", 700.0)
+    # Oferty tańsze niż próg kategorii nie są crawlowane ani śledzone (stan below_min) - patrz price_min_for().
+    # ANALYZER_PRICE_MIN (wspólny dla wszystkich kategorii) - tylko gdy ustawiony; domyślnie progi per kategoria.
+    price_min: float = field(default_factory=lambda: _env_float("ANALYZER_PRICE_MIN", None))
     price_max: float = _env_float("ANALYZER_PRICE_MAX", 20000.0)
     initial_partitions: int = _env_int("ANALYZER_INITIAL_PARTITIONS", 8)
     # Partycja węższa niż tyle zł nie jest już dzielona po cenie (potrzebna druga oś - marka/stan, później).
@@ -74,6 +87,15 @@ class AnalyzerConfig:
     watch_hours: tuple = field(default_factory=lambda: parse_range(_env("ANALYZER_WATCH_HOURS"), (10.0, 14.0)))
     # Niedokończone przejście młodsze niż tyle godzin jest wznawiane zamiast zaczynane od nowa.
     resume_hours: float = _env_float("ANALYZER_RESUME_HOURS", 24.0)
+
+    def price_min_for(self, catalog_id):
+        """Próg ceny kategorii: ANALYZER_PRICE_MIN_<id> > ANALYZER_PRICE_MIN > DEFAULT_PRICE_MIN > 700."""
+        own = _env(f"ANALYZER_PRICE_MIN_{int(catalog_id)}")
+        if own:
+            return float(own)
+        if self.price_min is not None:
+            return self.price_min
+        return DEFAULT_PRICE_MIN.get(int(catalog_id), 700.0)
 
     @property
     def split_above(self):

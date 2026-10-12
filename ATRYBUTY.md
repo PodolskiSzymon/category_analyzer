@@ -1,5 +1,12 @@
 # Co wyciągamy z ofert laptopów – segmenty kupujących i parametry
 
+> **Kategoria Vinted 3580 (laptopy).** Zasady wspólne dla wszystkich kategorii (laptopy, telefony, konsole,
+> tablety): **`EKSTRAKCJA.md`** – ma pierwszeństwo. *(poprawka Claude 2026-10-12)*: stan wizualny zapisujemy we
+> wspólnej skali `condition_grade` (`new_sealed`, `new_open`, `A_plus`, `A`, `B`, `C`, `D`, `unknown`); skala
+> `visual_grade` A–D z sekcji 1 mapuje się: A → `A_plus`/`A`, B → `B`, C → `C`, D → `D`. Pola platformy (cena,
+> polubienia, „Dodane”, firma, kraj) wypełnia baza, nie AI; parametry z wiedzy o modelu (panel, TGP, rok) – tabela
+> `models` raz na model.
+
 Cel: dla każdej oferty ustalić **segment** (kto ją kupuje) i **parametry, od których w tym segmencie zależy cena
 i szybkość sprzedaży**. Raporty (etap 4) grupują ceny po „kluczu konfiguracji” właściwym dla segmentu – inaczej
 mediana miesza MacBooka M1 8/256 z M1 16/512 albo RTX 4060 80 W z RTX 4060 140 W. Sniper używa tych samych pól

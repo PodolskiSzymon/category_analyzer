@@ -570,3 +570,28 @@ def test_seller_country_kept_personal_data_removed():
     assert parse_item({"id": 12, "user": {"id": 1}}, 3580).seller_country is None
     assert redact({"user": {"login": "x", "country_code": "LT"}})["user"] == {"redacted": True, "country_code": "LT"}
     assert redact({"user": {"login": "x"}})["user"] == "<redacted>"
+
+
+def test_price_min_per_catalog(monkeypatch):
+    cfg = AnalyzerConfig(db_path=":memory:")
+    cfg.price_min = None
+    monkeypatch.delenv("ANALYZER_PRICE_MIN_3025", raising=False)
+    assert cfg.price_min_for(3580) == 700 and cfg.price_min_for(3661) == 300 and cfg.price_min_for(9999) == 700
+    monkeypatch.setenv("ANALYZER_PRICE_MIN_3025", "150")
+    assert cfg.price_min_for(3025) == 150
+    cfg.price_min = 500.0
+    assert cfg.price_min_for(3661) == 500 and cfg.price_min_for(3025) == 150
+
+
+def test_two_catalogs_in_one_db():
+    phones = FakeMarket(market_prices(2000, seed=12))
+    laptops = FakeMarket(market_prices(2000, seed=13))
+    for i in list(phones.items):                      # inne ID niż laptopy
+        phones.items[i + 10_000_000] = phones.items.pop(i)
+    conn, _, _, _ = crawl(make_cfg(price_min=None), laptops, catalog_id=3580)
+    crawl(make_cfg(price_min=None), phones, conn, catalog_id=3661)
+    mins = dict(conn.execute("SELECT catalog_id, MIN(price_from) FROM partitions WHERE active=1 GROUP BY catalog_id"))
+    assert mins == {3580: 700, 3661: 300}
+    counts = dict(conn.execute("SELECT catalog_id, COUNT(*) FROM listings GROUP BY catalog_id"))
+    assert counts[3580] == sum(1 for p in laptops.items.values() if p >= 700)
+    assert counts[3661] == sum(1 for p in phones.items.values() if p >= 300)

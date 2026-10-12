@@ -16,6 +16,7 @@ from sniper.session import RateLimited, SessionExpired
 
 from . import db
 from .catalog import fetch_page
+from .config import catalog_label
 from .diff import finish_snapshot
 from .partition import Range, can_split, initial_ranges, needs_split, split, to_grosze, to_zl
 
@@ -42,15 +43,15 @@ class Crawler:
             self._apply_price_min(catalog_id)
             return
         with self.conn:
-            for rng in initial_ranges(self.cfg.price_min, self.cfg.price_max, self.cfg.initial_partitions):
+            for rng in initial_ranges(self.cfg.price_min_for(catalog_id), self.cfg.price_max, self.cfg.initial_partitions):
                 self.conn.execute("INSERT INTO partitions (catalog_id, price_from, price_to) VALUES (?, ?, ?)",
                                   (catalog_id, rng.price_from, rng.price_to))
-        log.info("[PLAN] Kategoria %s: %d partycji startowych.", catalog_id, self.cfg.initial_partitions + 1)
+        log.info("[PLAN] Kategoria %s: %d partycji startowych.", catalog_label(catalog_id), self.cfg.initial_partitions + 1)
 
     def _apply_price_min(self, catalog_id):
         """Plan z bazy dopasowany do ANALYZER_PRICE_MIN: partycje poniżej wyłączone, przecinające próg - przycięte,
         a gdy próg obniżono - nowa partycja [price_min, najniższa istniejąca)."""
-        low = self.cfg.price_min
+        low = self.cfg.price_min_for(catalog_id)
         with self.conn:
             off = self.conn.execute("UPDATE partitions SET active=0 WHERE catalog_id=? AND active=1 AND price_to IS NOT "
                                     "NULL AND price_to < ?", (catalog_id, low)).rowcount
@@ -64,7 +65,8 @@ class Crawler:
                                   (catalog_id, low, lowest))
                 added = 1
         if off or cut or added:
-            log.info("[PLAN] Cena minimalna %g zł: wyłączone partycje %d, przycięte %d, dodane %d.", low, off, cut, added)
+            log.info("[PLAN] %s: cena minimalna %g zł: wyłączone partycje %d, przycięte %d, dodane %d.", catalog_label(catalog_id), low,
+                     off, cut, added)
 
     def _pending_partitions(self, catalog_id, run_id):
         return self.conn.execute(
@@ -204,7 +206,7 @@ class Crawler:
         self._ensure_partitions(catalog_id)
         run_id = self._start_run(catalog_id)
         queue = list(self._pending_partitions(catalog_id, run_id))
-        log.info("[CRAWL] Przejście #%d kategorii %s: %d partycji do zrobienia.", run_id, catalog_id, len(queue))
+        log.info("[CRAWL] Przejście #%d kategorii %s: %d partycji do zrobienia.", run_id, catalog_label(catalog_id), len(queue))
         while queue:
             row = queue.pop(0)
             queue[0:0] = await self.crawl_partition(run_id, row)
@@ -212,7 +214,8 @@ class Crawler:
         if self._pending_partitions(catalog_id, run_id):
             log.warning("[CRAWL] Przejście #%d niepełne - uruchom crawl ponownie, żeby je dokończyć.", run_id)
             return run_id, False
-        gone = finish_snapshot(self.conn, catalog_id, run_id, self.cfg.gone_after_runs, self.cfg.price_min)
+        gone = finish_snapshot(self.conn, catalog_id, run_id, self.cfg.gone_after_runs,
+                               self.cfg.price_min_for(catalog_id))
         with self.conn:
             self.conn.execute("UPDATE crawl_runs SET finished_at=?, gone=? WHERE id=?", (db.utcnow(), gone, run_id))
         self.stats["gone"] = gone

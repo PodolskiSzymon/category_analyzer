@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 
 from . import db
-from .config import AnalyzerConfig, build_session
+from .config import AnalyzerConfig, build_session, catalog_label
 
 log = logging.getLogger("analyzer")
 
@@ -148,7 +148,7 @@ def coverage_lines(conn, tolerance=1.0, tolerance_pct=1.5):
             stats["worst"].append((row["last_total"] - have, row["price_from"], row["price_to"], row["last_total"], have))
     for catalog_id, st in by_catalog.items():
         tol = f"±max({tolerance:g} zł, {tolerance_pct:g}%)" if tolerance_pct else f"±{tolerance:g} zł"
-        lines.append(f"kategoria {catalog_id}: kontrola pokrycia - partycji z brakami {st['short']}/{st['parts']}, "
+        lines.append(f"kategoria {catalog_label(catalog_id)}: kontrola pokrycia - partycji z brakami {st['short']}/{st['parts']}, "
                      f"brakuje łącznie ~{st['missing']} ofert (tolerancja ceny {tol})")
         for miss, lo, hi, total, have in sorted(st["worst"], reverse=True)[:5]:
             lines.append(f"    {lo:g}-{'∞' if hi is None else format(hi, 'g')} zł: Vinted {total}, w bazie {have} "
@@ -160,14 +160,14 @@ def status_lines(conn):
     lines = []
     for row in conn.execute("SELECT catalog_id, state, COUNT(*) AS n FROM listings GROUP BY catalog_id, state "
                             "ORDER BY catalog_id, n DESC"):
-        lines.append(f"kategoria {row['catalog_id']}: {row['state']:<13} {row['n']}")
+        lines.append(f"kategoria {catalog_label(row['catalog_id'])}: {row['state']:<13} {row['n']}")
     for row in conn.execute("SELECT catalog_id, COUNT(*) AS n, SUM(details_at IS NOT NULL) AS d FROM listings "
                             "WHERE state IN ('active', 'reserved', 'unlisted') GROUP BY catalog_id"):
-        lines.append(f"kategoria {row['catalog_id']}: szczegóły pobrane dla {row['d']}/{row['n']} śledzonych ofert")
+        lines.append(f"kategoria {catalog_label(row['catalog_id'])}: szczegóły pobrane dla {row['d']}/{row['n']} śledzonych ofert")
     for row in conn.execute(
             "SELECT catalog_id, COUNT(*) AS n, SUM(last_total) AS total, SUM(last_items) AS items, "
             "SUM(oversize) AS oversize FROM partitions WHERE active=1 GROUP BY catalog_id"):
-        lines.append(f"kategoria {row['catalog_id']}: partycji {row['n']}, suma total_entries "
+        lines.append(f"kategoria {catalog_label(row['catalog_id'])}: partycji {row['n']}, suma total_entries "
                      f"{row['total'] if row['total'] is not None else '?'}, zebrano {row['items'] or 0}, "
                      f"oversize {row['oversize'] or 0}")
     for row in conn.execute("SELECT * FROM crawl_runs ORDER BY id DESC LIMIT 5"):

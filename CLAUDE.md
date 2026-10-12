@@ -57,7 +57,7 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `total_entries` → za duża partycja dzielona; bez `total_entries` – przepełnienie = pełna ostatnia dozwolona strona;
   wznawianie przerwanego przejścia; 429 → przerwa), `diff.py` (migawka: `missed_runs`, `gone_pending`; oferty
   w partycjach oversize pomijane), `probe.py` (etap 0), CLI `probe | crawl | status`.
-* **Testy**: `analyzer/tests` – 34 testy (w tym kraj sprzedawcy, dryf kursów, details, cena minimalna, kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
+* **Testy**: `analyzer/tests` – 36 testów (w tym dwie kategorie w jednej bazie, próg ceny per kategoria, kraj sprzedawcy, dryf kursów, details, cena minimalna, kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
   `pagination`, z `price_to` włącznie i wyłącznie, ponowne przejście (zmiana ceny, rezerwacja, zniknięcie →
   `gone_pending` po 2 przejściach, powrót), cena z liczbą ofert > limit (oversize), wznawianie po błędach.
   Atrapa 50 tys. ofert: wszystkie zebrane, 653 zapytania (minimum 521), drugie przejście 575.
@@ -133,6 +133,16 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   w `observations` (statystyki obniżek mają je filtrować `real_change`). Użytkownik znalazł kursy, z których korzysta
   front Vinted: `api.exchangerate-api.com/v4/latest/USD` (Referer vinted.pl) – na razie niepotrzebne (cena w walucie
   sprzedawcy jest w sidebar `conversion.seller_price`). Details: ~200 ofert / 13 min (~4 s/ofertę), ReadTimeout co kilkaset (ponawiane w kolejnym cyklu).
+* **Cztery kategorie (2026-10-12, prośba użytkownika)**: laptopy 3580, **telefony 3661, konsole 3025, tablety 3728**
+  (catalog_id z cURL użytkownika – parametry jak dla laptopów; przeglądarka wysyła dodatkowo puste
+  `attribute_ids[color|internal_memory_capacity|sim_lock|video_game_platform]`, my ich nie wysyłamy – działało dla
+  laptopów). `ANALYZER_CATALOGS` domyślnie wszystkie 4; `watch` bez `--catalog`. Cena minimalna per kategoria:
+  `AnalyzerConfig.price_min_for()` – `ANALYZER_PRICE_MIN_<id>` > `ANALYZER_PRICE_MIN` > domyślne (laptopy 700,
+  pozostałe 300 – propozycja Claude). Logi/status z nazwą kategorii (`config.catalog_label`).
+  Dokumentacja ekstrakcji: **`EKSTRAKCJA.md`** (wspólne: 3 źródła – platforma / oferta / tabela `models` raz na
+  model; format obiektowy; wspólny rdzeń pól; jedna skala `condition_grade`; czego nie zbieramy) +
+  `ATRYBUTY_TELEFONY.md`, `ATRYBUTY_KONSOLE.md`, `ATRYBUTY_TABLETY.md` (wersje użytkownika z poprawkami:
+  [P] = z platformy, [–] = nie zbieramy, ⚠ = niewidziane w danych, segmenty do statystyk).
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
@@ -191,7 +201,7 @@ python -m analyzer status                       # podsumowanie bazy
 python -m pytest analyzer/tests sniper/tests    # testy bez sieci
 python -m analyzer resolve [--limit N]          # zniknięte z katalogu -> sold / deleted / unlisted
 python -m analyzer details [--limit N]          # opis + atrybuty raz na ofertę
-python -m analyzer watch                        # bez końca: crawl + resolve, między przejściami details
+python -m analyzer watch                        # bez końca: crawl wszystkich kategorii + resolve, między przejściami details
 # jeszcze nie istnieją: extract (etap 3), report (etap 4)
 ```
 
