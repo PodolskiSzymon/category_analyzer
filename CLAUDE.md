@@ -109,7 +109,9 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   było. Przerwa `ANALYZER_DETAILS_DELAY_S` 2–5 s → zaległość ~17 tys. ≈ 17 h, potem tylko nowe (~kilkaset/dobę).
   „Dodane” w sidebar_active = „tygodnia”, zrzut: „3 mies.”, „3 min.” (⚠ nie wiadomo, czy podbicie zmienia datę).
 * **`ATRYBUTY.md`**: segmenty kupujących (gaming, MacBook, biznesowe, ultrabooki, 2w1/dotykowe, stacje robocze,
-  budżetowe, Chromebooki, uszkodzone, retro) + parametry wspólne i klucze konfiguracji do grupowania cen.
+  budżetowe, Chromebooki, uszkodzone, retro) + parametry wspólne i klucze konfiguracji do grupowania cen;
+  sekcja 1a – słownik GPU (prośba użytkownika: profesjonalne NVIDIA RTX A500–A5500 / Ada / Quadro z Delli Precision,
+  AMD Radeon RX / Radeon Pro WX/W / Pro 5xxxM z MacBooków, iGPU 680M/780M/890M, Intel Arc) – pro liczone osobno.
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
