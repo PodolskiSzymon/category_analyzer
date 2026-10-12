@@ -95,8 +95,10 @@ def apply_result(conn, row, state, status_code, body, now):
         sidebar = unwrap_sidebar(body)
         price = to_float(sidebar.get("price"))
         if price is None:
-            last = db.last_observation(conn, row["id"])
-            price = last["price"] if last else None
+            price = row["price_now"]
+            if price is None:
+                last = db.last_observation(conn, row["id"])
+                price = last["price"] if last else None
         start = row["created_at"] or row["first_seen"]
         conn.execute("UPDATE listings SET state='sold', state_at=?, sold_price=?, days_to_sell=? WHERE id=?",
                      (now, price, _days(start, row["last_seen"]), row["id"]))

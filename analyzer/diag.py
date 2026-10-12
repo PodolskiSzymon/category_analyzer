@@ -65,8 +65,7 @@ def coverage_report(conn, examples=12):
     for p in conn.execute("SELECT * FROM partitions WHERE active=1 AND last_total IS NOT NULL"):
         hi = p["price_to"] + 1 if p["price_to"] is not None else 1e12
         have = conn.execute(
-            """SELECT COUNT(*) FROM listings l WHERE l.last_run_id=? AND
-               (SELECT price FROM observations o WHERE o.listing_id=l.id ORDER BY seen_at DESC LIMIT 1) BETWEEN ? AND ?""",
+            "SELECT COUNT(*) FROM listings l WHERE l.last_run_id=? AND l.price_now BETWEEN ? AND ?",
             (p["done_run_id"], p["price_from"] - 1, hi)).fetchone()[0]
         if p["last_total"] - have > worst:
             worst, part = p["last_total"] - have, p
@@ -76,8 +75,7 @@ def coverage_report(conn, examples=12):
     lines.append(f"Najgorsza partycja {lo:g}-{hi:g} zł: Vinted {part['last_total']}, brak {worst}")
     # Surowe pozycje katalogu z ostatniego przejścia, których cena jest blisko partycji, ale poza nią.
     rows = conn.execute(
-        """SELECT l.id, l.title, l.currency,
-                  (SELECT price FROM observations o WHERE o.listing_id=l.id ORDER BY seen_at DESC LIMIT 1) AS price,
+        """SELECT l.id, l.title, l.currency, l.price_now AS price,
                   (SELECT seller_currency FROM details d WHERE d.listing_id=l.id) AS sc
            FROM listings l WHERE l.last_run_id=? AND l.state IN ('active','reserved','unlisted')""",
         (part["done_run_id"],)).fetchall()

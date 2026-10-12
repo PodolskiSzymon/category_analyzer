@@ -127,7 +127,19 @@ CREATE TABLE details (
 );
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4]
+# v5 (diag 2026-10-12): ceny ofert zagranicznych dryfują z kursem walut (11 810 „zmian” < 0,5% w jednym przejściu).
+# Bieżąca cena z katalogu trafia do listings (price_now/total_now) przy każdym przejściu; observations dostaje wiersz
+# tylko przy prawdziwej zmianie (patrz real_change).
+SCHEMA_V5 = """
+ALTER TABLE listings ADD COLUMN price_now REAL;
+ALTER TABLE listings ADD COLUMN total_now REAL;
+UPDATE listings SET price_now = (SELECT price FROM observations o WHERE o.listing_id=listings.id
+                                 ORDER BY seen_at DESC LIMIT 1),
+                    total_now = (SELECT total_price FROM observations o WHERE o.listing_id=listings.id
+                                 ORDER BY seen_at DESC LIMIT 1);
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5]
 
 
 def utcnow():
@@ -176,6 +188,33 @@ _OBSERVED = ("price", "total_price", "is_reserved", "favourite_count")
 # Nowy wiersz observations (i surowy JSON) tylko przy zmianie ceny / rezerwacji; polubienia i wyświetlenia
 # aktualizujemy w listings (ostatnia wartość przed zniknięciem oferty = „popyt” w chwili sprzedaży).
 _PRICE_STATUS = ("price", "total_price", "is_reserved")
+# Zmiana ceny oferty zagranicznej mniejsza niż tyle procent = przeliczenie kursu, nie decyzja sprzedawcy.
+FX_DRIFT_PCT = 1.0
+
+
+def _whole(value):
+    return value is not None and abs(value - round(value)) < 0.005
+
+
+def real_change(last, obs, seller_currency=None):
+    """Czy obserwacja różni się od poprzedniej NAPRAWDĘ (sprzedawca zmienił cenę / rezerwację).
+
+    Oferty w PLN (waluta sprzedawcy PLN, albo - przed pobraniem szczegółów - obie ceny pełne złotówki): każda zmiana
+    ceny. Oferty zagraniczne: zmiana o co najmniej FX_DRIFT_PCT % (mniejsze to dryf kursu; cena z opłatą ignorowana).
+    """
+    if last is None:
+        return True
+    if last["is_reserved"] != obs["is_reserved"]:
+        return True
+    old, new = last["price"], obs["price"]
+    if old == new:
+        return False
+    if old is None or new is None:
+        return True
+    native = seller_currency == "PLN" or (seller_currency is None and _whole(old) and _whole(new))
+    if native:
+        return True
+    return abs(new - old) / old * 100 >= FX_DRIFT_PCT
 # Stany, z których oferta wraca do active/reserved, gdy znów pojawi się w katalogu.
 _REVIVABLE = "('active', 'reserved', 'gone_pending', 'hidden', 'unlisted', 'below_min')"
 
@@ -191,11 +230,12 @@ def upsert_item(conn, item, run_id, seen_at):
     if row is None:
         conn.execute(
             """INSERT INTO listings (id, catalog_id, title, brand, status_label, currency, photo_url, photo_ts,
-                   first_seen, last_seen, last_run_id, state, state_at, seller_hash, favourite_count, view_count, model)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   first_seen, last_seen, last_run_id, state, state_at, seller_hash, favourite_count, view_count, model,
+                   price_now, total_now)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (item.id, item.catalog_id, item.title, item.brand, item.status_label, item.currency, item.photo_url,
              item.photo_ts, seen_at, seen_at, run_id, item.state, seen_at, item.seller_hash, item.favourite_count,
-             item.view_count, item.model))
+             item.view_count, item.model, item.price, item.total_price))
         conn.execute("INSERT INTO observations (listing_id, seen_at, price, total_price, is_reserved, favourite_count)"
                      " VALUES (?, ?, ?, ?, ?, ?)", (item.id, seen_at, *obs.values()))
         put_raw(conn, item.id, "catalog", item.raw, seen_at)
@@ -208,14 +248,15 @@ def upsert_item(conn, item, run_id, seen_at):
                currency=COALESCE(?, currency), photo_url=COALESCE(?, photo_url), photo_ts=COALESCE(photo_ts, ?),
                seller_hash=COALESCE(seller_hash, ?),
                favourite_count=COALESCE(?, favourite_count), view_count=COALESCE(?, view_count),
-               model=COALESCE(?, model),
+               model=COALESCE(?, model), price_now=?, total_now=?,
                state_at=CASE WHEN state IN {_REVIVABLE} AND state != ? THEN ? ELSE state_at END,
                state=CASE WHEN state IN {_REVIVABLE} THEN ? ELSE state END
            WHERE id=?""",
         (seen_at, run_id, item.title, item.brand, item.status_label, item.currency, item.photo_url, item.photo_ts,
-         item.seller_hash, item.favourite_count, item.view_count, item.model, item.state, seen_at, item.state, item.id))
+         item.seller_hash, item.favourite_count, item.view_count, item.model, item.price, item.total_price, item.state, seen_at, item.state, item.id))
     last = last_observation(conn, item.id)
-    if last is not None and all(last[k] == obs[k] for k in _PRICE_STATUS):
+    seller = conn.execute("SELECT seller_currency FROM details WHERE listing_id=?", (item.id,)).fetchone()
+    if not real_change(last, obs, seller[0] if seller else None):
         return "same"
     conn.execute("INSERT OR REPLACE INTO observations (listing_id, seen_at, price, total_price, is_reserved, "
                  "favourite_count) VALUES (?, ?, ?, ?, ?, ?)", (item.id, seen_at, *obs.values()))

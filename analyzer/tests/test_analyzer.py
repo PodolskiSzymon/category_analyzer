@@ -389,7 +389,7 @@ def test_coverage_check_reports_missing():
         conn.execute("DELETE FROM observations WHERE listing_id IN (SELECT id FROM listings LIMIT 5)")
         conn.execute("DELETE FROM raw")
         conn.execute("DELETE FROM listings WHERE id NOT IN (SELECT listing_id FROM observations)")
-    assert "brakuje łącznie ~5 ofert" in coverage_lines(conn, tolerance=0.0)[0]
+    assert "brakuje łącznie ~5 ofert" in coverage_lines(conn, tolerance=0.0, tolerance_pct=0.0)[0]
 
 
 def test_price_min_applied_to_existing_plan():
@@ -520,7 +520,39 @@ def test_diag_report_runs():
     market = FakeMarket(market_prices(2000, seed=11))
     conn, _, _, _ = crawl(make_cfg(), market)
     for i in list(market.items)[:50]:
-        market.items[i] = round(market.items[i] * 1.003, 2)      # dryf kursu walut
+        market.items[i] = round(market.items[i] * 0.9, 2)        # prawdziwe obniżki o 10%
     crawl(make_cfg(), market, conn)
     text = "\n".join(report(conn))
-    assert "obserwacji ze zmianą 50" in text and "< 0,5%" in text and "Najgorsza partycja" in text
+    assert "obserwacji ze zmianą 50" in text and "≥ 10%" in text and "Najgorsza partycja" in text
+
+
+def test_fx_drift_is_not_a_change():
+    from analyzer.db import real_change
+
+    def obs(price, reserved=None):
+        return {"price": price, "is_reserved": reserved}
+
+    # prawdziwe przykłady z diag 2026-10-12 (RON, EUR)
+    assert not real_change(obs(706.5), obs(707.7))                  # przed details: ułamkowa cena = zagraniczna
+    assert not real_change(obs(710.38), obs(710.63), "EUR")
+    assert real_change(obs(710.38), obs(650.0), "EUR")              # obniżka sprzedawcy
+    assert real_change(obs(700.0), obs(699.0))                      # PLN (pełne złote) - każda zmiana
+    assert real_change(obs(700.5), obs(700.0), "PLN")
+    assert real_change(obs(700.0, 0), obs(700.0, 1))                # rezerwacja
+    assert not real_change(obs(700.0), obs(700.0))
+    assert real_change(None, obs(700.0))
+
+
+def test_fx_drift_updates_price_now_without_observation():
+    conn = db.connect(":memory:")
+    base = {"id": 7, "price": {"amount": "706.50", "currency_code": "PLN"},
+            "total_item_price": {"amount": "744.73", "currency_code": "PLN"}}
+    db.upsert_item(conn, parse_item(base, 3580), 1, "2026-10-11T10:00:00.000+00:00")
+    drift = dict(base, price={"amount": "707.70", "currency_code": "PLN"},
+                 total_item_price={"amount": "745.99", "currency_code": "PLN"})
+    assert db.upsert_item(conn, parse_item(drift, 3580), 2, "2026-10-12T10:00:00.000+00:00") == "same"
+    row = conn.execute("SELECT price_now, total_now FROM listings WHERE id=7").fetchone()
+    assert tuple(row) == (707.7, 745.99)
+    assert conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
+    cut = dict(base, price={"amount": "600.00", "currency_code": "PLN"})
+    assert db.upsert_item(conn, parse_item(cut, 3580), 3, "2026-10-13T10:00:00.000+00:00") == "changed"

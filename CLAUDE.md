@@ -57,7 +57,7 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `total_entries` → za duża partycja dzielona; bez `total_entries` – przepełnienie = pełna ostatnia dozwolona strona;
   wznawianie przerwanego przejścia; 429 → przerwa), `diff.py` (migawka: `missed_runs`, `gone_pending`; oferty
   w partycjach oversize pomijane), `probe.py` (etap 0), CLI `probe | crawl | status`.
-* **Testy**: `analyzer/tests` – 30 testów (w tym details, cena minimalna, kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
+* **Testy**: `analyzer/tests` – 33 testy (w tym dryf kursów, details, cena minimalna, kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
   `pagination`, z `price_to` włącznie i wyłącznie, ponowne przejście (zmiana ceny, rezerwacja, zniknięcie →
   `gone_pending` po 2 przejściach, powrót), cena z liczbą ofert > limit (oversize), wznawianie po błędach.
   Atrapa 50 tys. ofert: wszystkie zebrane, 653 zapytania (minimum 521), drugie przejście 575.
@@ -117,8 +117,15 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   below_min 19, hidden 19, reserved 3, **sold 0** (podejrzane – może sprzedane zostają jakiś czas w katalogu albo
   znikają jako 404; do obserwacji). Po #4 kontrola pokrycia: brak 473 (798–831 zł: Vinted 816, w bazie 563).
   Hipoteza: dryf kursów walut (oferty zagraniczne – w resolve dużo tytułów CZ/LT/HU/SE) albo zmiana opłaty →
-  zmiana `price`/`total_price` u wielu ofert. **Do ustalenia `python -m analyzer diag`** (bez sieci) zanim zmienię
-  logikę „zmienione”. Details: ~200 ofert / 13 min (~4 s/ofertę), ReadTimeout co kilkaset (ponawiane w kolejnym cyklu).
+  zmiana `price`/`total_price` u wielu ofert. **`diag` (2026-10-12) potwierdził dryf kursów**: 11 810 zmian = cena
+  i cena z opłatą naraz, 11 789 < 0,5%, waluty sprzedawców RON 1912, EUR 1550, HUF 815, CZK 689, SEK 472, DKK 382
+  (PLN 7; reszta bez details); wiele ofert ma identyczne ceny w zł (np. 706.5 RON, 710.38 EUR = okrągła cena
+  w walucie sprzedawcy). Poprawka (migracja v5): `listings.price_now/total_now` aktualizowane co przejście,
+  `observations` tylko przy `db.real_change` (PLN: każda zmiana; zagraniczne: ≥ 1%; przed details: ułamkowa cena =
+  zagraniczna), kontrola pokrycia z tolerancją max(1 zł, 1,5%) na `price_now`. Stare wiersze dryfu z #4 zostały
+  w `observations` (statystyki obniżek mają je filtrować `real_change`). Użytkownik znalazł kursy, z których korzysta
+  front Vinted: `api.exchangerate-api.com/v4/latest/USD` (Referer vinted.pl) – na razie niepotrzebne (cena w walucie
+  sprzedawcy jest w sidebar `conversion.seller_price`). Details: ~200 ofert / 13 min (~4 s/ofertę), ReadTimeout co kilkaset (ponawiane w kolejnym cyklu).
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze

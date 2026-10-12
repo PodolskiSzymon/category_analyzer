@@ -126,20 +126,20 @@ async def cmd_probe(cfg, catalog_id, items):
         await session.close()
 
 
-def coverage_lines(conn, tolerance=1.0):
-    """Kontrola kompletności: dla każdej partycji ile ofert z bazy (cena z ostatniej obserwacji ± tolerancja) vs
-    total_entries z Vinted. Braki > 0 = oferty, których nie zebraliśmy (albo cena filtra Vinted ≠ cena oferty)."""
+def coverage_lines(conn, tolerance=1.0, tolerance_pct=1.5):
+    """Kontrola kompletności: dla każdej partycji ile ofert z bazy (bieżąca cena ± max(tolerance zł, tolerance_pct %))
+    vs total_entries z Vinted. Tolerancja procentowa - filtr Vinted liczy oferty zagraniczne po swoim kursie
+    (diag 2026-10-12), więc ich cena w zł bywa poza przedziałem o ułamek procenta."""
     lines = []
     rows = conn.execute("SELECT * FROM partitions WHERE active=1 AND last_total IS NOT NULL ORDER BY catalog_id, "
                         "price_from").fetchall()
     by_catalog = {}
     for row in rows:
-        hi = row["price_to"] + tolerance if row["price_to"] is not None else 1e12
-        have = conn.execute(
-            """SELECT COUNT(*) FROM listings l WHERE l.catalog_id=? AND l.last_run_id=? AND
-                 (SELECT price FROM observations o WHERE o.listing_id=l.id ORDER BY seen_at DESC LIMIT 1)
-                 BETWEEN ? AND ?""",
-            (row["catalog_id"], row["done_run_id"], row["price_from"] - tolerance, hi)).fetchone()[0]
+        lo = row["price_from"] - max(tolerance, row["price_from"] * tolerance_pct / 100)
+        hi = (row["price_to"] + max(tolerance, row["price_to"] * tolerance_pct / 100)
+              if row["price_to"] is not None else 1e12)
+        have = conn.execute("SELECT COUNT(*) FROM listings WHERE catalog_id=? AND last_run_id=? AND "
+                            "price_now BETWEEN ? AND ?", (row["catalog_id"], row["done_run_id"], lo, hi)).fetchone()[0]
         stats = by_catalog.setdefault(row["catalog_id"], {"parts": 0, "short": 0, "missing": 0, "worst": []})
         stats["parts"] += 1
         if have < row["last_total"]:
@@ -147,8 +147,9 @@ def coverage_lines(conn, tolerance=1.0):
             stats["missing"] += row["last_total"] - have
             stats["worst"].append((row["last_total"] - have, row["price_from"], row["price_to"], row["last_total"], have))
     for catalog_id, st in by_catalog.items():
+        tol = f"±max({tolerance:g} zł, {tolerance_pct:g}%)" if tolerance_pct else f"±{tolerance:g} zł"
         lines.append(f"kategoria {catalog_id}: kontrola pokrycia - partycji z brakami {st['short']}/{st['parts']}, "
-                     f"brakuje łącznie ~{st['missing']} ofert (tolerancja ceny ±{tolerance:g} zł)")
+                     f"brakuje łącznie ~{st['missing']} ofert (tolerancja ceny {tol})")
         for miss, lo, hi, total, have in sorted(st["worst"], reverse=True)[:5]:
             lines.append(f"    {lo:g}-{'∞' if hi is None else format(hi, 'g')} zł: Vinted {total}, w bazie {have} "
                          f"(brak {miss})")

@@ -26,8 +26,7 @@ def finish_snapshot(conn, catalog_id, run_id, gone_after, price_min=0.0):
     oversize = [(to_grosze(r["price_from"]), to_grosze(r["price_to"])) for r in conn.execute(
         "SELECT price_from, price_to FROM partitions WHERE catalog_id=? AND active=1 AND oversize=1", (catalog_id,))]
     rows = conn.execute(
-        f"""SELECT l.id, l.missed_runs,
-                   (SELECT price FROM observations o WHERE o.listing_id=l.id ORDER BY seen_at DESC LIMIT 1) AS price
+        f"""SELECT l.id, l.missed_runs, l.price_now AS price
             FROM listings l
             WHERE l.catalog_id=? AND l.state IN {LIVE_STATES} AND (l.last_run_id IS NULL OR l.last_run_id != ?)""",
         (catalog_id, run_id)).fetchall()
