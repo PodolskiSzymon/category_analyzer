@@ -18,6 +18,7 @@ def make_cfg(**kw):
     cfg.per_page, cfg.max_results, cfg.partition_fill = 96, 960, 0.9
     cfg.price_min, cfg.price_max, cfg.initial_partitions = 0.0, 20000.0, 4
     cfg.page_delay, cfg.gone_after_runs, cfg.seller_salt = (0.0, 0.0), 2, ""
+    cfg.details_catalogs = None
     for k, v in kw.items():
         setattr(cfg, k, v)
     return cfg
@@ -595,3 +596,23 @@ def test_two_catalogs_in_one_db():
     counts = dict(conn.execute("SELECT catalog_id, COUNT(*) FROM listings GROUP BY catalog_id"))
     assert counts[3580] == sum(1 for p in laptops.items.values() if p >= 700)
     assert counts[3661] == sum(1 for p in phones.items.values() if p >= 300)
+
+
+def test_details_only_for_selected_catalogs(monkeypatch):
+    from analyzer.config import _details_catalogs
+    from analyzer.details import candidates
+
+    monkeypatch.delenv("ANALYZER_DETAILS_CATALOGS", raising=False)
+    assert _details_catalogs() == (3580,)
+    monkeypatch.setenv("ANALYZER_DETAILS_CATALOGS", "all")
+    assert _details_catalogs() is None
+    monkeypatch.setenv("ANALYZER_DETAILS_CATALOGS", "3580,3661")
+    assert _details_catalogs() == (3580, 3661)
+
+    laptops, phones = FakeMarket(market_prices(300, seed=14)), FakeMarket(market_prices(300, seed=15))
+    for i in list(phones.items):
+        phones.items[i + 10_000_000] = phones.items.pop(i)
+    conn, _, _, _ = crawl(make_cfg(), laptops, catalog_id=3580)
+    crawl(make_cfg(), phones, conn, catalog_id=3661)
+    assert {r["catalog_id"] for r in candidates(conn, catalogs=(3580,))} == {3580}
+    assert {r["catalog_id"] for r in candidates(conn)} == {3580, 3661}

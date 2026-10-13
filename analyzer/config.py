@@ -52,6 +52,13 @@ def _catalogs():
     return tuple(int(c) for c in raw.replace(";", ",").split(",") if c.strip())
 
 
+def _details_catalogs():
+    raw = _env("ANALYZER_DETAILS_CATALOGS", "3580").lower()
+    if raw in ("all", "*", "wszystkie"):
+        return None
+    return tuple(int(c) for c in raw.replace(";", ",").split(",") if c.strip())
+
+
 @dataclass
 class AnalyzerConfig:
     db_path: str = _env("ANALYZER_DB") or str(ROOT / "data" / "analyzer.db")
@@ -81,6 +88,10 @@ class AnalyzerConfig:
     gone_after_runs: int = _env_int("ANALYZER_GONE_AFTER_RUNS", 2)
     # Sól do hasha sprzedawcy (RODO). Pusta = hash sprzedawcy nie jest zapisywany wcale.
     seller_salt: str = _env("ANALYZER_SELLER_SALT")
+    # Kategorie, w których szczegóły pobieramy dla KAŻDEJ śledzonej oferty (details w watch). W pozostałych tylko
+    # przy zniknięciu oferty (resolver zapisuje opis sprzedanej z tej samej odpowiedzi) - oszczędność transferu
+    # proxy (decyzja użytkownika 2026-10-13). „all” = wszystkie kategorie.
+    details_catalogs: tuple = field(default_factory=lambda: _details_catalogs())
     # Szczegóły ofert (details): losowa przerwa między zapytaniami (s).
     details_delay: tuple = field(default_factory=lambda: parse_range(_env("ANALYZER_DETAILS_DELAY_S"), (2.0, 5.0)))
     # Tryb `watch`: odstęp między startami pełnych przejść (godziny, zakres „od-do” - losowo).

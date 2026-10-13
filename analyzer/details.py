@@ -85,17 +85,28 @@ def store_details(conn, listing_id, body, fetched_at):
     return created
 
 
-def candidates(conn, limit=None):
-    sql = """SELECT * FROM listings WHERE details_at IS NULL AND state IN ('active', 'reserved', 'unlisted')
-             ORDER BY id DESC"""
-    return conn.execute(sql + (" LIMIT ?" if limit else ""), (limit,) if limit else ()).fetchall()
+def candidates(conn, limit=None, catalogs=None):
+    """Oferty bez szczegółów; catalogs - tylko z tych kategorii (None = wszystkie)."""
+    sql = "SELECT * FROM listings WHERE details_at IS NULL AND state IN ('active', 'reserved', 'unlisted')"
+    params = []
+    if catalogs is not None:
+        sql += f" AND catalog_id IN ({','.join('?' * len(catalogs)) or 'NULL'})"
+        params.extend(catalogs)
+    sql += " ORDER BY id DESC"
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
 
 
 async def fetch_details(cfg, session, conn, limit=None, deadline=None, sleep=asyncio.sleep, clock=None):
     """Pobiera szczegóły ofert bez nich. deadline (datetime UTC) - przerwij po tym czasie (tryb watch)."""
     clock = clock or (lambda: datetime.now(deadline.tzinfo) if deadline else None)
-    rows = candidates(conn, limit)
-    log.info("[DETAILS] Ofert bez szczegółów: %d%s.", len(rows), f" (limit {limit})" if limit else "")
+    catalogs = getattr(cfg, "details_catalogs", None)
+    rows = candidates(conn, limit, catalogs)
+    log.info("[DETAILS] Ofert bez szczegółów: %d%s%s.", len(rows), f" (limit {limit})" if limit else "",
+             "" if catalogs is None else f" w kategoriach {', '.join(map(str, catalogs))} (pozostałe: tylko przy "
+                                         "zniknięciu oferty, ANALYZER_DETAILS_CATALOGS)")
     counts = {}
     for n, row in enumerate(rows):
         if deadline and clock() >= deadline:

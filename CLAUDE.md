@@ -228,4 +228,11 @@ dalej w `unreachable_sniper`; zmiany w `sniper/` tutaj tylko, gdy analizator ich
 * **Budżet na proxy jest OGRANICZONY** (użytkownik 2026-10-13: IPRoyal drogie – zostajemy przy 4 kategoriach, bez
   szerokiego przeglądu wielu kategorii). Wcześniejsza notatka „duży budżet” nieaktualna. ~500 GB miejsca na dysku.
   Oszczędność transferu ważniejsza niż wygoda; propozycje cięć: details tylko dla zniknętych (nowe kategorie),
-  rzadsze przejścia, sticky session IPRoyal – czekają na decyzję użytkownika.
+  rzadsze przejścia, sticky session IPRoyal. **Zrobione: `ANALYZER_DETAILS_CATALOGS`** (domyślnie `3580`) –
+  szczegóły każdej oferty tylko dla laptopów; telefony/konsole/tablety: opis tylko przy zniknięciu (resolver zapisuje
+  sidebar sprzedanej/ukrytej/zarezerwowanej; usunięte 404 – bez opisu). Raport IPRoyal 8–13.10: **Sniper ~110 MB/dzień**
+  (`api.vinted.pl`, ~5800 skanów × ~19 KB przy `SNIPER_PER_PAGE=20`) – zalecone `SNIPER_PER_PAGE=5` (~35 MB/dzień);
+  analizator: katalog laptopów ~15 MB/dzień, zaległe details ~80–90 MB/dzień (`www.vinted.pl`, ~12 KB/ofertę z TLS);
+  „requests count” w IPRoyal = połączenia, nie zapytania. Sniper działa równolegle na tym samym koncie IPRoyal.
+* **Serwer użytkownika** (od 2026-10-13): stary laptop i5-5200U, 4 GB RAM, SSD, Wi-Fi, `C:\Users\szymo\category_analyzer`
+  (klon gałęzi `claude/focused-johnson-6ytqgt` – `main` ma tylko PR #1 z etapem 1!).
