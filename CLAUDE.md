@@ -225,5 +225,7 @@ dalej w `unreachable_sniper`; zmiany w `sniper/` tutaj tylko, gdy analizator ich
 * Zmiany parametrów zapytań do Vinted tylko na podstawie realnego ruchu przeglądarki (cURL z F12) albo testu
   u użytkownika – bez zgadywania endpointów.
 * Nie commitować sekretów (hasła, ciastka, tokeny, `.env`) ani danych (`data/`).
-* Użytkownik ma duży budżet na proxy i ~500 GB miejsca (może dokupić SSD 1 TB), ale chce oszczędności transferu
-  bez utraty danych.
+* **Budżet na proxy jest OGRANICZONY** (użytkownik 2026-10-13: IPRoyal drogie – zostajemy przy 4 kategoriach, bez
+  szerokiego przeglądu wielu kategorii). Wcześniejsza notatka „duży budżet” nieaktualna. ~500 GB miejsca na dysku.
+  Oszczędność transferu ważniejsza niż wygoda; propozycje cięć: details tylko dla zniknętych (nowe kategorie),
+  rzadsze przejścia, sticky session IPRoyal – czekają na decyzję użytkownika.
