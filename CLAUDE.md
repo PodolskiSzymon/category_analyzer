@@ -143,6 +143,9 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   model; format obiektowy; wspólny rdzeń pól; jedna skala `condition_grade`; czego nie zbieramy) +
   `ATRYBUTY_TELEFONY.md`, `ATRYBUTY_KONSOLE.md`, `ATRYBUTY_TABLETY.md` (wersje użytkownika z poprawkami:
   [P] = z platformy, [–] = nie zbieramy, ⚠ = niewidziane w danych, segmenty do statystyk).
+* **Kategoria RAM (2026-10-14, prośba użytkownika)** – do wyceny konfiguracji laptopów i strategii „rozbiórki”
+  (ATRYBUTY.md §6: z = x + y − zakup − c). **Czeka na cURL kategorii od użytkownika** (catalog_id nieznany; DIMM vs
+  SO-DIMM). Propozycja: próg 100 zł, bez details każdej oferty (parametry w tytule).
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze

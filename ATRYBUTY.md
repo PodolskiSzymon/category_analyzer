@@ -250,3 +250,21 @@ decydujący, a wyższy w uwagach.
 
 **Reguła odrzucenia:** oferty z flagą `gpu_not_in_guidelines` (GTX, MX, iGPU w segmencie gamingowym) sniper
 odrzuca bez liczenia progu, ale zapisuje je do statystyk segmentu.
+
+## 6. Strategia „rozbiórki” – RAM / dysk osobno (pomysł użytkownika 2026-10-14)
+
+Kupić laptopa, którego normalnie bym nie kupił, gdy ma cenny RAM (albo dysk): wyjąć i sprzedać osobno, włożyć
+tańszy, sprzedać laptopa. Zysk **z = x + y − cena zakupu (z opłatą) − c − wysyłki**, gdzie
+x = mediana sprzedaży wyjętych kości (kategoria RAM, używane, ten typ/pojemność/układ), y = mediana sprzedaży tego
+modelu z mniejszym RAM-em (laptopy), c = koszt kości zastępczych (najtańszy pasujący zestaw z kategorii RAM).
+Próg użytkownika: z ≥ ~1500 zł.
+
+Wymagane pola (wiedza o modelu – tabela `models`, bo sprzedawcy rzadko to podają):
+`ram_soldered` (lutowany = rozbiórka niemożliwa: MacBooki, większość ultrabooków, część cienkich gamingowych),
+`ram_type` (DDR4/DDR5 SO-DIMM, LPDDR), `ram_slots`, `ram_config` (2×16 ≠ 1×32), `max_ram_gb`; analogicznie
+dysk: `ssd_slots`, `ssd_interface` (NVMe PCIe 3/4). Wymaga kategorii **RAM** w crawlu (czeka na cURL od
+użytkownika, z rozróżnieniem DIMM / SO-DIMM).
+
+Przykład (oferta zagraniczna, 2026-10-14): ASUS ROG Strix SCAR 17 G733QS, R9 5900HX, RTX 3080 Laptop 16 GB,
+32 GB **DDR4-3200 SO-DIMM** (Armoury Crate: 3200 MT/s, 31,4 GB; Ryzen 5000H = tylko DDR4), 2 sloty wymienne
+(⚠ z wiedzy o modelu – potwierdzić CPU-Z/SPD), 3 658,37 zł z opłatą.
