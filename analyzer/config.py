@@ -37,19 +37,18 @@ def parse_range(text, default):
 # Kategorie Vinted (catalog_id z cURL użytkownika 2026-10-12).
 CATALOG_NAMES = {3580: "laptopy", 3661: "telefony", 3025: "konsole", 3728: "tablety",
                  # 2026-10-14: kategorie „mieszane” (klasyfikacja ofert regułami - analyzer/classify.py) i gry
-                 3582: "podzespoły komputerowe", 3583: "puste nośniki", 3584: "akcesoria komputerowe", 3026: "gry"}
+                 3582: "podzespoły komputerowe", 3583: "puste nośniki", 3584: "akcesoria komputerowe"}
+# Gry (3026) odpuszczone 2026-10-14 (użytkownik: pole „platforma” wypełniane bez ładu) - wrócimy kiedy indziej.
 # Domyślna cena minimalna per kategoria (zł). Laptopy: decyzja użytkownika 2026-10-11 (< 700 zł = starocie).
 # Telefony / konsole / tablety: 300 zł - propozycja Claude (poniżej głównie akcesoria, zepsute i bardzo stare modele);
 # zmiana: ANALYZER_PRICE_MIN_<catalog_id>=..., np. ANALYZER_PRICE_MIN_3025=150.
 DEFAULT_PRICE_MIN = {3580: 700.0, 3661: 300.0, 3025: 300.0, 3728: 300.0,
-                     # kategorie mieszane: dolna granica crawla (próg każdej NASZEJ kategorii sprawdzamy osobno),
-                     # gry: 40 zł (taniej - głównie stare gry; dużo ofert = dużo transferu)
-                     3582: 100.0, 3583: 100.0, 3584: 100.0, 3026: 40.0}
+                     # kategorie mieszane: dolna granica crawla (próg każdej NASZEJ kategorii sprawdzamy osobno)
+                     3582: 100.0, 3583: 100.0, 3584: 100.0}
 # Nasze kategorie przedmiotu: te z własnym katalogiem Vinted biorą próg z katalogu, pozostałe - ANALYZER_PRICE_MIN_<NAZWA>.
-CATEGORY_CATALOG = {"laptop": 3580, "phone": 3661, "console": 3025, "tablet": 3728, "game": 3026}
+CATEGORY_CATALOG = {"laptop": 3580, "phone": 3661, "console": 3025, "tablet": 3728}
 DEFAULT_CATEGORY_MIN = {"gpu": 150.0, "ram": 100.0, "storage": 100.0}
-# Szczegóły (details/sidebar) każdej oferty - domyślnie wszystkie nasze kategorie poza grami (dużo tanich ofert,
-# parametry w tytule). Gry i reszta - opis tylko przy zniknięciu oferty (resolver).
+# Szczegóły (details/sidebar) każdej oferty - domyślnie wszystkie nasze kategorie.
 DEFAULT_DETAILS_CATEGORIES = ("laptop", "phone", "console", "tablet", "gpu", "ram", "storage")
 
 

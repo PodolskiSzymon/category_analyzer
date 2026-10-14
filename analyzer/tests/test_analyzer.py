@@ -604,7 +604,7 @@ def test_details_only_for_selected_catalogs(monkeypatch):
 
     monkeypatch.delenv("ANALYZER_DETAILS_CATALOGS", raising=False)
     monkeypatch.delenv("ANALYZER_DETAILS_CATEGORIES", raising=False)
-    assert "game" not in _details_catalogs() and {"laptop", "ram", "gpu", "storage"} <= set(_details_catalogs())
+    assert {"laptop", "phone", "console", "tablet", "ram", "gpu", "storage"} == set(_details_catalogs())
     monkeypatch.setenv("ANALYZER_DETAILS_CATALOGS", "all")
     assert _details_catalogs() is None
     monkeypatch.setenv("ANALYZER_DETAILS_CATALOGS", "3580,3661")         # dawny zapis numerami katalogów
@@ -645,9 +645,9 @@ def test_details_only_for_selected_catalogs(monkeypatch):
     ("PS5 Slim 1TB + 2 pady", "console"),
     ("Xbox One S 1TB", "console"),
     ("Steam Deck 512GB OLED", "console"),
-    ("Gra FIFA 23 PS4", "game"),
-    ("FIFA 23 Xbox One", "game"),
-    ("Spider-Man 2 PS5", "game"),
+    ("Gra FIFA 23 PS4", "ignored"),          # gry odpuszczone 2026-10-14
+    ("FIFA 23 Xbox One", "ignored"),
+    ("Spider-Man 2 PS5", "ignored"),
     ("iPhone 13 128GB", "phone"),
     ("iPad Air 5", "tablet"),
     ("Dysk twardy WD Blue 1TB HDD", "ignored"),

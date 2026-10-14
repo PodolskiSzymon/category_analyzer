@@ -152,23 +152,22 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
 * **Kategorie mieszane + gry (2026-10-14, cURL użytkownika)**: 3582 „Części i podzespoły komputerowe”, 3583 „Puste
   nośniki”, 3584 „Akcesoria komputerowe” (wszędzie mieszanka: karty graficzne, RAM, dyski, ale też płyty główne,
   zasilacze, wentylatory, klawiatury, myszki, pendrive'y, płyty CD, karty SIM, komputery stacjonarne, a nawet laptopy
-  i konsole) + 3026 „Gry” (prawie same gry, crawl normalny). Zbieramy tylko: `gpu`, `ram`, `storage` (SSD/NVMe, także
-  dyski do konsol; bez HDD), `game` + laptop/konsola/telefon/tablet z złej kategorii → istniejące kategorie.
+  i konsole). Zbieramy tylko: `gpu`, `ram`, `storage` (SSD/NVMe, także dyski do konsol; bez HDD) + laptop/konsola/
+  telefon/tablet z złej kategorii → istniejące kategorie. **Gry (3026) odpuszczone** (użytkownik 2026-10-14: pole
+  platforma wypełniane bez ładu; wrócimy kiedy indziej) – gry z kategorii mieszanych → `ignored`.
   **Migracja v7**: `listings.category` (NASZA kategoria przedmiotu, niezależna od catalog_id Vinted),
   `category_src` (catalog / rule / ai / manual), `category_rule`. `analyzer/classify.py`: reguły na tytuł + marka/model
   z `item_box` (bez sieci): zwroty „do laptopa / na PS5” usuwane → akcesoria i części spoza zakresu (STRONG_JUNK, HDD)
   → komputery stacjonarne → urządzenia (laptop, konsola – tylko z wersją/pojemnością/„konsola”, sama platforma =
-  gra) → gpu → ram → storage → gra → słabe śmieci → `unknown`. Stany: `ignored` (sam wiersz, bez obserwacji/raw,
+  gra) → gpu → ram → storage → gra (→ ignored) → słabe śmieci → `unknown`. Stany: `ignored` (sam wiersz, bez obserwacji/raw,
   nie idzie do resolvera/details), `unclassified` (unknown – bez kosztu proxy), `below_min` wg progu NASZEJ kategorii
-  (`AnalyzerConfig.category_min`: laptop/phone/console/tablet/game z progów katalogów; gpu 150, ram 100, storage
-  100 – `ANALYZER_PRICE_MIN_GPU|RAM|STORAGE`); kategorie mieszane crawlowane od 100 zł, gry od 40 zł.
+  (`AnalyzerConfig.category_min`: laptop/phone/console/tablet z progów katalogów; gpu 150, ram 100, storage
+  100 – `ANALYZER_PRICE_MIN_GPU|RAM|STORAGE`); kategorie mieszane crawlowane od 100 zł.
   `classify-report` (udział nasze / nierozpoznane / odrzucone + przykłady) i `reclassify` (po poprawce reguł, bez
-  sieci). Details: `ANALYZER_DETAILS_CATEGORIES` (domyślnie wszystkie nasze poza grami; dawne
+  sieci). Details: `ANALYZER_DETAILS_CATEGORIES` (domyślnie wszystkie nasze kategorie; dawne
   `ANALYZER_DETAILS_CATALOGS` z numerami nadal działa). **AI do nierozpoznanych – jeszcze nie**: decyzja po pierwszym
   `classify-report` (crawl i tak pobiera każdą stronę katalogu; klasyfikacja oszczędza tylko details/resolve
-  i tokeny; nierozpoznane nic nie kosztują, dopóki są `unclassified`). ⚠ Gry: bardzo dużo tanich ofert – możliwe
-  partycje oversize (ponad 960 ofert przy jednej cenie, np. 50 zł) → druga oś `attribute_ids[video_game_platform]`
-  wymaga ID platform z cURL.
+  i tokeny; nierozpoznane nic nie kosztują, dopóki są `unclassified`).
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze

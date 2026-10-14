@@ -2,7 +2,7 @@
 do NASZYCH kategorii przedmiotu – bez sieci, tylko z tytułu i marki/modelu z formularza (`item_box`).
 
 Prośba użytkownika 2026-10-14: zbieramy karty graficzne (`gpu`), pamięci RAM (`ram`), dyski SSD/NVMe – także do
-konsol, bez HDD (`storage`) i gry (`game`); laptopy / konsole / telefony / tablety wystawione w złej kategorii trafiają
+konsol, bez HDD (`storage`); gry – odpuszczone (rozpoznawane tylko, żeby je odrzucić); laptopy / konsole / telefony / tablety wystawione w złej kategorii trafiają
 do istniejących kategorii (`laptop`, `console`, `phone`, `tablet`). Reszta = `ignored` (nie śledzimy, nie pobieramy
 szczegółów, nie sprawdzamy zniknięć). Nierozpoznane = `unknown` (stan `unclassified`, bez kosztu proxy) – do raportu
 `classify-report`, poprawy reguł (`reclassify`, offline) albo później AI.
@@ -12,16 +12,16 @@ Kolejność reguł ma znaczenie:
   2. ewidentne akcesoria / części, których nie zbieramy („podstawka chłodząca”, „torba”, „HDD”) → ignored,
   3. komputery stacjonarne → ignored (nie zbieramy),
   4. urządzenia: laptop, konsola, telefon, tablet (przed podzespołami – „Laptop RTX 3060” to laptop),
-  5. podzespoły: gpu, ram, storage, gra,
+  5. podzespoły: gpu, ram, storage; gra → ignored,
   6. słabe słowa „śmieciowe” (klawiatura, mysz, kabel…) → ignored,
   7. reszta → unknown.
 """
 import re
 import unicodedata
 
-CATEGORY_BY_CATALOG = {3580: "laptop", 3661: "phone", 3025: "console", 3728: "tablet", 3026: "game"}
+CATEGORY_BY_CATALOG = {3580: "laptop", 3661: "phone", 3025: "console", 3728: "tablet"}
 MIXED_CATALOGS = (3582, 3583, 3584)
-WANTED = ("laptop", "phone", "console", "tablet", "gpu", "ram", "storage", "game")
+WANTED = ("laptop", "phone", "console", "tablet", "gpu", "ram", "storage")
 
 DEVICE_WORDS = (r"laptop\w*|notebook\w*|macbook\w*|komputer\w*|pc|ps[345]|playstation\s*\d?|xbox\w*|switch\w*|"
                 r"steam\s*deck|telefon\w*|iphone\w*|smartfon\w*|tablet\w*|ipad\w*|konsol\w*|console\w*|"
@@ -104,7 +104,8 @@ RULES = (
     ("gpu", "karta graficzna", GPU),
     ("ram", "RAM", RAM),
     ("storage", "dysk SSD/NVMe", STORAGE),
-    ("game", "gra", GAME),
+    # Gry odpuszczone 2026-10-14 (użytkownik) - rozpoznajemy je tylko po to, żeby odrzucić.
+    ("ignored", "gra (pominięte)", GAME),
     ("ignored", "akcesorium (słabe)", WEAK_JUNK),
 )
 
