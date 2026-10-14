@@ -144,7 +144,19 @@ SCHEMA_V6 = """
 ALTER TABLE listings ADD COLUMN seller_country TEXT;
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6]
+# v7 (2026-10-14): NASZA kategoria przedmiotu niezależna od katalogu Vinted (kategorie mieszane: podzespoły, nośniki,
+# akcesoria komputerowe - laptop z „podzespołów” trafia do `laptop`). category_src: catalog / rule / ai / manual.
+SCHEMA_V7 = """
+ALTER TABLE listings ADD COLUMN category TEXT;
+ALTER TABLE listings ADD COLUMN category_src TEXT;
+ALTER TABLE listings ADD COLUMN category_rule TEXT;
+UPDATE listings SET category = CASE catalog_id WHEN 3580 THEN 'laptop' WHEN 3661 THEN 'phone' WHEN 3025 THEN 'console'
+                                               WHEN 3728 THEN 'tablet' WHEN 3026 THEN 'game' END,
+                    category_src = 'catalog';
+CREATE INDEX listings_category ON listings(category, state);
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7]
 
 
 def utcnow():
@@ -220,45 +232,75 @@ def real_change(last, obs, seller_currency=None):
     if native:
         return True
     return abs(new - old) / old * 100 >= FX_DRIFT_PCT
-# Stany, z których oferta wraca do active/reserved, gdy znów pojawi się w katalogu.
-_REVIVABLE = "('active', 'reserved', 'gone_pending', 'hidden', 'unlisted', 'below_min')"
+# Stany, z których oferta wraca do active/reserved (albo przechodzi w inny stan wynikający z klasyfikacji / progu ceny),
+# gdy znów pojawi się w katalogu. sold / deleted / closed zostają.
+REVIVABLE = {"active", "reserved", "gone_pending", "hidden", "unlisted", "below_min", "ignored", "unclassified"}
+KEEP_CATEGORY_SRC = ("ai", "manual")   # decyzji AI / ręcznych nie nadpisują reguły przy kolejnych przejściach
 
 
-def upsert_item(conn, item, run_id, seen_at):
-    """Zapis jednej pozycji katalogu (CatalogItem). Zwraca 'new' / 'changed' / 'same'.
+def desired_state(category, item, min_for=None):
+    """Stan oferty widzianej teraz w katalogu: ignored / unclassified / below_min (poniżej progu kategorii) / active /
+    reserved."""
+    if category == "ignored":
+        return "ignored"
+    if category == "unknown":
+        return "unclassified"
+    low = min_for(category) if min_for else 0
+    if low and item.price is not None and item.price < low:
+        return "below_min"
+    return item.state
 
-    Obserwacja (cena, rezerwacja, polubienia) - nowy wiersz tylko przy zmianie. Surowy JSON pozycji katalogu -
-    przy pierwszym wystąpieniu i przy każdej zmianie obserwacji (żeby nie powielać identycznych danych).
+
+def upsert_item(conn, item, run_id, seen_at, min_for=None):
+    """Zapis jednej pozycji katalogu (CatalogItem). Zwraca 'new' / 'changed' / 'same' / 'ignored'.
+
+    Obserwacja (cena, rezerwacja) - nowy wiersz tylko przy prawdziwej zmianie; surowy JSON - przy pierwszym
+    wystąpieniu i każdej zmianie. Oferty `ignored` (nie nasze przedmioty) - sam wiersz listings (do kontroli pokrycia
+    i raportu klasyfikacji), bez obserwacji i surowego JSON-a. min_for(kategoria) - próg ceny kategorii.
     """
-    row = conn.execute("SELECT id FROM listings WHERE id=?", (item.id,)).fetchone()
+    from .classify import CATEGORY_BY_CATALOG
+
+    row = conn.execute("SELECT id, state, category, category_src, category_rule FROM listings WHERE id=?",
+                       (item.id,)).fetchone()
+    category = item.category or CATEGORY_BY_CATALOG.get(item.catalog_id)
+    src, rule = item.category_src or "catalog", item.category_rule
+    if row is not None and row["category_src"] in KEEP_CATEGORY_SRC:
+        category, src, rule = row["category"], row["category_src"], row["category_rule"]
+    state = desired_state(category, item, min_for)
     obs = {k: getattr(item, k) for k in _OBSERVED}
     if row is None:
         conn.execute(
             """INSERT INTO listings (id, catalog_id, title, brand, status_label, currency, photo_url, photo_ts,
                    first_seen, last_seen, last_run_id, state, state_at, seller_hash, favourite_count, view_count, model,
-                   price_now, total_now, seller_country)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   price_now, total_now, seller_country, category, category_src, category_rule)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (item.id, item.catalog_id, item.title, item.brand, item.status_label, item.currency, item.photo_url,
-             item.photo_ts, seen_at, seen_at, run_id, item.state, seen_at, item.seller_hash, item.favourite_count,
-             item.view_count, item.model, item.price, item.total_price, item.seller_country))
+             item.photo_ts, seen_at, seen_at, run_id, state, seen_at, item.seller_hash, item.favourite_count,
+             item.view_count, item.model, item.price, item.total_price, item.seller_country, category, src, rule))
+        if state == "ignored":
+            return "ignored"
         conn.execute("INSERT INTO observations (listing_id, seen_at, price, total_price, is_reserved, favourite_count)"
                      " VALUES (?, ?, ?, ?, ?, ?)", (item.id, seen_at, *obs.values()))
         put_raw(conn, item.id, "catalog", item.raw, seen_at)
         return "new"
 
+    new_state = state if row["state"] in REVIVABLE else row["state"]
     # Dane „stałe” uzupełniamy (COALESCE) - brak w nowej odpowiedzi nie kasuje tego, co już wiemy.
     conn.execute(
-        f"""UPDATE listings SET last_seen=?, last_run_id=?, missed_runs=0,
+        """UPDATE listings SET last_seen=?, last_run_id=?, missed_runs=0,
                title=COALESCE(?, title), brand=COALESCE(?, brand), status_label=COALESCE(?, status_label),
                currency=COALESCE(?, currency), photo_url=COALESCE(?, photo_url), photo_ts=COALESCE(photo_ts, ?),
                seller_hash=COALESCE(seller_hash, ?),
                favourite_count=COALESCE(?, favourite_count), view_count=COALESCE(?, view_count),
                model=COALESCE(?, model), price_now=?, total_now=?, seller_country=COALESCE(?, seller_country),
-               state_at=CASE WHEN state IN {_REVIVABLE} AND state != ? THEN ? ELSE state_at END,
-               state=CASE WHEN state IN {_REVIVABLE} THEN ? ELSE state END
+               category=?, category_src=?, category_rule=?,
+               state_at=CASE WHEN state != ? THEN ? ELSE state_at END, state=?
            WHERE id=?""",
         (seen_at, run_id, item.title, item.brand, item.status_label, item.currency, item.photo_url, item.photo_ts,
-         item.seller_hash, item.favourite_count, item.view_count, item.model, item.price, item.total_price, item.seller_country, item.state, seen_at, item.state, item.id))
+         item.seller_hash, item.favourite_count, item.view_count, item.model, item.price, item.total_price,
+         item.seller_country, category, src, rule, new_state, seen_at, new_state, item.id))
+    if new_state == "ignored":
+        return "ignored"
     last = last_observation(conn, item.id)
     seller = conn.execute("SELECT seller_currency FROM details WHERE listing_id=?", (item.id,)).fetchone()
     if not real_change(last, obs, seller[0] if seller else None):

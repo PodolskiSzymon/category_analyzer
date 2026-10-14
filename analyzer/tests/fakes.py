@@ -12,6 +12,7 @@ class FakeMarket:
         self.with_pagination = with_pagination
         self.upper_inclusive = upper_inclusive
         self.reserved = set()
+        self.titles = {}          # id -> tytuł (domyślnie „Laptop <id>”)
         self.fail = fail          # funkcja (price_from, price_to, page) -> True = rzuć błąd
         self.requests = []
 
@@ -28,7 +29,7 @@ class FakeMarket:
         ids = self.query(price_from, price_to)
         visible = ids[:self.limit]
         chunk = visible[(page - 1) * per_page: page * per_page]
-        data = {"items": [{"id": i, "title": f"Laptop {i}", "price": {"amount": f"{self.items[i]:.2f}",
+        data = {"items": [{"id": i, "title": self.titles.get(i, f"Laptop {i}"), "price": {"amount": f"{self.items[i]:.2f}",
                                                                        "currency_code": "PLN"},
                            "item_box": {"accessibility_label": f"Laptop {i}, Marka: Lenovo, Stan: Bardzo dobry, "
                                                                f"{self.items[i]:.2f} zł", "second_line": "Bardzo dobry"},

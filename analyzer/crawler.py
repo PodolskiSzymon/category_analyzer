@@ -16,6 +16,7 @@ from sniper.session import RateLimited, SessionExpired
 
 from . import db
 from .catalog import fetch_page
+from .classify import classify_item
 from .config import catalog_label
 from .diff import finish_snapshot
 from .partition import Range, can_split, initial_ranges, needs_split, split, to_grosze, to_zl
@@ -143,10 +144,12 @@ class Crawler:
 
     def _save(self, run_id, items):
         now = db.utcnow()
-        counts = {"new": 0, "changed": 0, "same": 0}
+        counts = {"new": 0, "changed": 0, "same": 0, "ignored": 0}
+        min_for = getattr(self.cfg, "category_min", None)
         with self.conn:
             for item in items:
-                counts[db.upsert_item(self.conn, item, run_id, now)] += 1
+                item.category, item.category_src, item.category_rule = classify_item(item, item.catalog_id)
+                counts[db.upsert_item(self.conn, item, run_id, now, min_for)] += 1
         self._bump(run_id, new_ids=counts["new"], changed=counts["changed"], seen=len(items))
 
     async def crawl_partition(self, run_id, row):
@@ -214,8 +217,7 @@ class Crawler:
         if self._pending_partitions(catalog_id, run_id):
             log.warning("[CRAWL] Przejście #%d niepełne - uruchom crawl ponownie, żeby je dokończyć.", run_id)
             return run_id, False
-        gone = finish_snapshot(self.conn, catalog_id, run_id, self.cfg.gone_after_runs,
-                               self.cfg.price_min_for(catalog_id))
+        gone = finish_snapshot(self.conn, catalog_id, run_id, self.cfg.gone_after_runs, self.cfg.category_min)
         with self.conn:
             self.conn.execute("UPDATE crawl_runs SET finished_at=?, gone=? WHERE id=?", (db.utcnow(), gone, run_id))
         self.stats["gone"] = gone

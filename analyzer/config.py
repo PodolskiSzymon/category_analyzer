@@ -35,11 +35,22 @@ def parse_range(text, default):
 
 
 # Kategorie Vinted (catalog_id z cURL użytkownika 2026-10-12).
-CATALOG_NAMES = {3580: "laptopy", 3661: "telefony", 3025: "konsole", 3728: "tablety"}
+CATALOG_NAMES = {3580: "laptopy", 3661: "telefony", 3025: "konsole", 3728: "tablety",
+                 # 2026-10-14: kategorie „mieszane” (klasyfikacja ofert regułami - analyzer/classify.py) i gry
+                 3582: "podzespoły komputerowe", 3583: "puste nośniki", 3584: "akcesoria komputerowe", 3026: "gry"}
 # Domyślna cena minimalna per kategoria (zł). Laptopy: decyzja użytkownika 2026-10-11 (< 700 zł = starocie).
 # Telefony / konsole / tablety: 300 zł - propozycja Claude (poniżej głównie akcesoria, zepsute i bardzo stare modele);
 # zmiana: ANALYZER_PRICE_MIN_<catalog_id>=..., np. ANALYZER_PRICE_MIN_3025=150.
-DEFAULT_PRICE_MIN = {3580: 700.0, 3661: 300.0, 3025: 300.0, 3728: 300.0}
+DEFAULT_PRICE_MIN = {3580: 700.0, 3661: 300.0, 3025: 300.0, 3728: 300.0,
+                     # kategorie mieszane: dolna granica crawla (próg każdej NASZEJ kategorii sprawdzamy osobno),
+                     # gry: 40 zł (taniej - głównie stare gry; dużo ofert = dużo transferu)
+                     3582: 100.0, 3583: 100.0, 3584: 100.0, 3026: 40.0}
+# Nasze kategorie przedmiotu: te z własnym katalogiem Vinted biorą próg z katalogu, pozostałe - ANALYZER_PRICE_MIN_<NAZWA>.
+CATEGORY_CATALOG = {"laptop": 3580, "phone": 3661, "console": 3025, "tablet": 3728, "game": 3026}
+DEFAULT_CATEGORY_MIN = {"gpu": 150.0, "ram": 100.0, "storage": 100.0}
+# Szczegóły (details/sidebar) każdej oferty - domyślnie wszystkie nasze kategorie poza grami (dużo tanich ofert,
+# parametry w tytule). Gry i reszta - opis tylko przy zniknięciu oferty (resolver).
+DEFAULT_DETAILS_CATEGORIES = ("laptop", "phone", "console", "tablet", "gpu", "ram", "storage")
 
 
 def catalog_label(catalog_id):
@@ -53,10 +64,20 @@ def _catalogs():
 
 
 def _details_catalogs():
-    raw = _env("ANALYZER_DETAILS_CATALOGS", "3580").lower()
+    """Nasze kategorie, dla których pobieramy szczegóły każdej oferty. ANALYZER_DETAILS_CATEGORIES (albo dawne
+    ANALYZER_DETAILS_CATALOGS): nazwy (laptop, ram…) lub catalog_id (3580 → laptop); „all” = wszystkie (None)."""
+    raw = (_env("ANALYZER_DETAILS_CATEGORIES") or _env("ANALYZER_DETAILS_CATALOGS")).lower()
+    if not raw:
+        return DEFAULT_DETAILS_CATEGORIES
     if raw in ("all", "*", "wszystkie"):
         return None
-    return tuple(int(c) for c in raw.replace(";", ",").split(",") if c.strip())
+    by_catalog = {v: k for k, v in CATEGORY_CATALOG.items()}
+    out = []
+    for token in raw.replace(";", ",").split(","):
+        token = token.strip()
+        if token:
+            out.append(by_catalog.get(int(token), token) if token.isdigit() else token)
+    return tuple(out)
 
 
 @dataclass
@@ -107,6 +128,15 @@ class AnalyzerConfig:
         if self.price_min is not None:
             return self.price_min
         return DEFAULT_PRICE_MIN.get(int(catalog_id), 700.0)
+
+    def category_min(self, category):
+        """Próg ceny NASZEJ kategorii (laptop → próg katalogu 3580; gpu/ram/storage → ANALYZER_PRICE_MIN_GPU itd.)."""
+        if category in CATEGORY_CATALOG:
+            return self.price_min_for(CATEGORY_CATALOG[category])
+        own = _env(f"ANALYZER_PRICE_MIN_{str(category).upper()}")
+        if own:
+            return float(own)
+        return DEFAULT_CATEGORY_MIN.get(category, 0.0)
 
     @property
     def split_above(self):

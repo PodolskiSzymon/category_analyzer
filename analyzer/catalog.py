@@ -55,6 +55,10 @@ class CatalogItem:
     view_count: int = None
     seller_hash: str = None
     seller_country: str = None
+    # Nasza kategoria przedmiotu (classify.py); None = z katalogu Vinted.
+    category: str = None
+    category_src: str = None
+    category_rule: str = None
     raw: dict = field(default_factory=dict, repr=False)
 
     @property

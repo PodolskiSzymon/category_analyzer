@@ -6,6 +6,7 @@
   watch  [--catalog 3580]                 bez końca: crawl + resolve, między przejściami details (10-14 h)
   details [--limit N]                     szczegóły ofert (opis, atrybuty, „Dodane”) raz na ofertę
   resolve [--limit N]                     zniknięte z katalogu -> sold / deleted / unlisted (1 zapytanie/ofertę)
+  classify-report / reclassify            klasyfikacja ofert z kategorii mieszanych (bez sieci)
   diag                                    zmiany cen i braki pokrycia w ostatnim przejściu (bez sieci)
   status                                  podsumowanie bazy (oferty, stany, partycje, przejścia, transfer)
 """
@@ -158,12 +159,12 @@ def coverage_lines(conn, tolerance=1.0, tolerance_pct=1.5):
 
 def status_lines(conn):
     lines = []
-    for row in conn.execute("SELECT catalog_id, state, COUNT(*) AS n FROM listings GROUP BY catalog_id, state "
-                            "ORDER BY catalog_id, n DESC"):
-        lines.append(f"kategoria {catalog_label(row['catalog_id'])}: {row['state']:<13} {row['n']}")
-    for row in conn.execute("SELECT catalog_id, COUNT(*) AS n, SUM(details_at IS NOT NULL) AS d FROM listings "
-                            "WHERE state IN ('active', 'reserved', 'unlisted') GROUP BY catalog_id"):
-        lines.append(f"kategoria {catalog_label(row['catalog_id'])}: szczegóły pobrane dla {row['d']}/{row['n']} śledzonych ofert")
+    for row in conn.execute("SELECT COALESCE(category, '?') AS category, state, COUNT(*) AS n FROM listings "
+                            "GROUP BY category, state ORDER BY category, n DESC"):
+        lines.append(f"przedmiot {row['category']:<8}: {row['state']:<13} {row['n']}")
+    for row in conn.execute("SELECT COALESCE(category, '?') AS category, COUNT(*) AS n, SUM(details_at IS NOT NULL) AS d "
+                            "FROM listings WHERE state IN ('active', 'reserved', 'unlisted') GROUP BY category"):
+        lines.append(f"przedmiot {row['category']:<8}: szczegóły pobrane dla {row['d']}/{row['n']} śledzonych ofert")
     for row in conn.execute(
             "SELECT catalog_id, COUNT(*) AS n, SUM(last_total) AS total, SUM(last_items) AS items, "
             "SUM(oversize) AS oversize FROM partitions WHERE active=1 GROUP BY catalog_id"):
@@ -200,6 +201,8 @@ def main(argv=None):
     p_show.add_argument("folder", nargs="?", default=None, help="domyślnie najnowszy data/probe/*")
     sub.add_parser("status", help="podsumowanie bazy")
     sub.add_parser("diag", help="diagnostyka bazy (zmiany cen, braki pokrycia) - bez sieci")
+    sub.add_parser("classify-report", help="klasyfikacja ofert z kategorii mieszanych - bez sieci")
+    sub.add_parser("reclassify", help="ponowna klasyfikacja zapisanych ofert po poprawce reguł - bez sieci")
     args = parser.parse_args(argv)
 
     cfg = AnalyzerConfig()
@@ -217,6 +220,15 @@ def main(argv=None):
     elif args.command == "probe-show":
         from .probe import show
         show(args.folder)
+    elif args.command in ("classify-report", "reclassify"):
+        from . import classify
+        conn = db.connect(cfg.db_path)
+        if args.command == "reclassify":
+            changes = classify.reclassify(conn, cfg.category_min)
+            print("Zmiany kategorii: " + (", ".join(f"{a} → {b}: {n}" for (a, b), n in sorted(changes.items()))
+                                          or "brak"))
+        print("\n".join(classify.report(conn)))
+        conn.close()
     elif args.command == "diag":
         from .diag import report
         conn = db.connect(cfg.db_path)

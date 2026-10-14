@@ -85,13 +85,13 @@ def store_details(conn, listing_id, body, fetched_at):
     return created
 
 
-def candidates(conn, limit=None, catalogs=None):
-    """Oferty bez szczegółów; catalogs - tylko z tych kategorii (None = wszystkie)."""
+def candidates(conn, limit=None, categories=None):
+    """Oferty bez szczegółów; categories - tylko NASZE kategorie z listy (None = wszystkie śledzone)."""
     sql = "SELECT * FROM listings WHERE details_at IS NULL AND state IN ('active', 'reserved', 'unlisted')"
     params = []
-    if catalogs is not None:
-        sql += f" AND catalog_id IN ({','.join('?' * len(catalogs)) or 'NULL'})"
-        params.extend(catalogs)
+    if categories is not None:
+        sql += f" AND category IN ({','.join('?' * len(categories)) or 'NULL'})"
+        params.extend(categories)
     sql += " ORDER BY id DESC"
     if limit:
         sql += " LIMIT ?"
@@ -106,7 +106,7 @@ async def fetch_details(cfg, session, conn, limit=None, deadline=None, sleep=asy
     rows = candidates(conn, limit, catalogs)
     log.info("[DETAILS] Ofert bez szczegółów: %d%s%s.", len(rows), f" (limit {limit})" if limit else "",
              "" if catalogs is None else f" w kategoriach {', '.join(map(str, catalogs))} (pozostałe: tylko przy "
-                                         "zniknięciu oferty, ANALYZER_DETAILS_CATALOGS)")
+                                         "zniknięciu oferty, ANALYZER_DETAILS_CATEGORIES)")
     counts = {}
     for n, row in enumerate(rows):
         if deadline and clock() >= deadline:

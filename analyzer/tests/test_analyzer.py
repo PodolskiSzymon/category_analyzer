@@ -603,16 +603,132 @@ def test_details_only_for_selected_catalogs(monkeypatch):
     from analyzer.details import candidates
 
     monkeypatch.delenv("ANALYZER_DETAILS_CATALOGS", raising=False)
-    assert _details_catalogs() == (3580,)
+    monkeypatch.delenv("ANALYZER_DETAILS_CATEGORIES", raising=False)
+    assert "game" not in _details_catalogs() and {"laptop", "ram", "gpu", "storage"} <= set(_details_catalogs())
     monkeypatch.setenv("ANALYZER_DETAILS_CATALOGS", "all")
     assert _details_catalogs() is None
-    monkeypatch.setenv("ANALYZER_DETAILS_CATALOGS", "3580,3661")
-    assert _details_catalogs() == (3580, 3661)
+    monkeypatch.setenv("ANALYZER_DETAILS_CATALOGS", "3580,3661")         # dawny zapis numerami katalogów
+    assert _details_catalogs() == ("laptop", "phone")
+    monkeypatch.setenv("ANALYZER_DETAILS_CATEGORIES", "laptop,ram")
+    assert _details_catalogs() == ("laptop", "ram")
 
     laptops, phones = FakeMarket(market_prices(300, seed=14)), FakeMarket(market_prices(300, seed=15))
     for i in list(phones.items):
         phones.items[i + 10_000_000] = phones.items.pop(i)
     conn, _, _, _ = crawl(make_cfg(), laptops, catalog_id=3580)
     crawl(make_cfg(), phones, conn, catalog_id=3661)
-    assert {r["catalog_id"] for r in candidates(conn, catalogs=(3580,))} == {3580}
+    assert {r["catalog_id"] for r in candidates(conn, categories=("laptop",))} == {3580}
     assert {r["catalog_id"] for r in candidates(conn)} == {3580, 3661}
+
+
+# ------------------------------------------------------------------ kategorie mieszane (classify)
+
+@pytest.mark.parametrize("title,expected", [
+    # prawdziwe tytuły ze zrzutów użytkownika 2026-10-14
+    ("pamięć RAM Kingston Fury Beast RGB 64GB [2×32GB] 5600MHz DDR5 CL36 DIMM", "ram"),
+    ("Pamięć RAM DDR5 Patriot Viper Venom 32Gb 2×16GB 6000Mhz CL36 RGB XMP 3.0 EXPO Nowa Gwarancja", "ram"),
+    ("ASUS Scar 17 Ryzen 9 5900HX 3080 1TB SSD 32GB", "laptop"),
+    ("RAM do laptopa 16GB DDR4 SO-DIMM", "ram"),
+    ("Pamięć Corsair Vengeance 2x8", "ram"),
+    ("Karta graficzna MSI RTX 3070 Ventus", "gpu"),
+    ("Gigabyte RTX 4060 Ti 8GB", "gpu"),
+    ("Radeon RX 6700 XT", "gpu"),
+    ("nVidia Quadro P2000", "gpu"),
+    ("Samsung 990 PRO 2TB NVMe", "storage"),
+    ("Dysk SSD do PS5 2TB z radiatorem", "storage"),
+    ("Seagate Expansion Card Xbox Series 1TB", "storage"),
+    ("Crucial P3 Plus 1TB", "storage"),
+    ("Dysk zewnętrzny SSD Samsung T7 1TB", "storage"),
+    ("Laptop Lenovo Legion 5 RTX 3060", "laptop"),
+    ("Komputer przenośny Lenovo", "laptop"),
+    ("Macbook Air M1", "laptop"),
+    ("PS5 Slim 1TB + 2 pady", "console"),
+    ("Xbox One S 1TB", "console"),
+    ("Steam Deck 512GB OLED", "console"),
+    ("Gra FIFA 23 PS4", "game"),
+    ("FIFA 23 Xbox One", "game"),
+    ("Spider-Man 2 PS5", "game"),
+    ("iPhone 13 128GB", "phone"),
+    ("iPad Air 5", "tablet"),
+    ("Dysk twardy WD Blue 1TB HDD", "ignored"),
+    ("Dysk zewnętrzny 1TB Toshiba", "ignored"),
+    ("Podstawka chłodząca pod laptopa", "ignored"),
+    ("Torba na laptopa 15,6", "ignored"),
+    ("Ładowarka do laptopa Dell 90W", "ignored"),
+    ("Komputer stacjonarny i7 RTX 3060", "ignored"),
+    ("Komputer Dell Optiplex", "ignored"),
+    ("Procesor Ryzen 5 5600X", "ignored"),
+    ("Płyta główna B550", "ignored"),
+    ("Zasilacz 750W Corsair", "ignored"),
+    ("Klawiatura mechaniczna Logitech", "ignored"),
+    ("Gamepad Xbox", "ignored"),
+    ("Pendrive 64GB", "ignored"),
+    ("Karta pamięci microSD 128GB", "ignored"),
+    ("Wentylator Arctic P12", "ignored"),
+    ("Kingston 16gb", "unknown"),
+])
+def test_classify_titles(title, expected):
+    from analyzer.classify import classify_text
+    assert classify_text(title)[0] == expected
+
+
+def test_mixed_catalog_routes_items_to_our_categories():
+    market = FakeMarket([400, 150, 900, 300, 120, 250, 500])
+    ids = sorted(market.items)
+    market.titles = {ids[0]: "Pamięć RAM DDR5 32GB 2x16 6000MHz", ids[1]: "Klawiatura mechaniczna RGB",
+                     ids[2]: "Laptop Dell Latitude 7420 i7 16GB", ids[3]: "Laptop HP 250 G7",
+                     ids[4]: "Karta graficzna GTX 1050 Ti", ids[5]: "Kingston 16gb", ids[6]: "Samsung 990 PRO 2TB NVMe"}
+    cfg = make_cfg(price_min=None)
+    conn, _, _, _ = crawl(cfg, market, catalog_id=3582)
+    rows = {r["id"]: (r["category"], r["state"]) for r in conn.execute("SELECT * FROM listings")}
+    assert rows[ids[0]] == ("ram", "active")
+    assert rows[ids[1]] == ("ignored", "ignored")
+    assert rows[ids[2]] == ("laptop", "active")              # laptop z „podzespołów” → istniejąca kategoria laptop
+    assert rows[ids[3]] == ("laptop", "below_min")           # 300 zł < próg laptopów 700 zł
+    assert rows[ids[4]] == ("gpu", "below_min")              # 120 zł < próg kart 150 zł
+    assert rows[ids[5]] == ("unknown", "unclassified")
+    assert rows[ids[6]] == ("storage", "active")
+    # odrzucone: bez obserwacji i surowego JSON-a (oszczędność miejsca)
+    assert conn.execute("SELECT COUNT(*) FROM observations WHERE listing_id=?", (ids[1],)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM raw WHERE listing_id=?", (ids[1],)).fetchone()[0] == 0
+
+    # wszystkie znikają: do sprawdzania (gone_pending) idą tylko nasze śledzone przedmioty
+    market.items.clear()
+    crawl(cfg, market, conn, catalog_id=3582)
+    crawl(cfg, market, conn, catalog_id=3582)
+    gone = {r[0] for r in conn.execute("SELECT id FROM listings WHERE state='gone_pending'")}
+    assert gone == {ids[0], ids[2], ids[6]}
+
+    from analyzer.classify import report
+    text = "\n".join(report(conn))
+    assert "Katalog 3582: 7 ofert" in text and "Kingston 16gb" in text
+
+
+def test_reclassify_after_rule_change():
+    from analyzer.classify import reclassify
+
+    market = FakeMarket([400, 150])
+    a, b = sorted(market.items)
+    market.titles = {a: "Pamięć RAM DDR4 16GB", b: "Klawiatura"}
+    cfg = make_cfg(price_min=None)
+    conn, _, _, _ = crawl(cfg, market, catalog_id=3582)
+    with conn:   # symulacja starej (błędnej) reguły
+        conn.execute("UPDATE listings SET category='ignored', state='ignored' WHERE id=?", (a,))
+    changes = reclassify(conn, cfg.category_min)
+    assert changes == {("ignored", "ram"): 1}
+    assert tuple(conn.execute("SELECT category, state FROM listings WHERE id=?", (a,)).fetchone()) == ("ram", "active")
+
+
+def test_migration_v7_sets_category_from_catalog():
+    import sqlite3
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    for number, script in enumerate(db.MIGRATIONS[:6], start=1):
+        conn.executescript(script)
+        conn.execute(f"PRAGMA user_version={number}")
+    conn.execute("INSERT INTO listings (id, catalog_id, first_seen, last_seen) VALUES (1, 3580, 'x', 'x'), "
+                 "(2, 3661, 'x', 'x')")
+    db.migrate(conn)
+    cats = dict(conn.execute("SELECT id, category FROM listings").fetchall())
+    assert cats == {1: "laptop", 2: "phone"}
