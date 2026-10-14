@@ -283,3 +283,19 @@ Zasady: zdjęcia stockowe → stan tylko z tekstu + flaga `stock_photos`. Słabe
 6. **Stan wizualny i modyfikacje kosmetyczne**
 7. **Dowód zakupu i gwarancja** (szczególnie handheld PC i nowe generacje)
 8. **Sygnały popytu** (polubienia, oferty) – do oceny szybkości odsprzedaży
+
+## 16. Rozbiórka – co da się wyjąć i sprzedać osobno *(Claude 2026-10-14, do strategii z ATRYBUTY.md §6)*
+
+| Konsola | RAM | Dysk wbudowany | Do wyjęcia |
+|---|---|---|---|
+| PS5 / Slim / Pro | lutowany | lutowany | dodatkowy dysk M.2 NVMe w slocie rozszerzeń (1–2 TB, z radiatorem) |
+| PS4 / Slim / Pro | lutowany | 2,5" SATA, wymienny | dysk (HDD mało wart, SSD więcej) |
+| Xbox Series X / S | lutowany | lutowany | karta rozszerzeń Seagate / WD (1–2 TB) |
+| Xbox One / S / X | lutowany | 2,5" SATA, wymienny | dysk |
+| Switch / Lite / OLED / Switch 2 | lutowany | lutowany | karta microSD (Switch 2: microSD Express) |
+| Steam Deck / ROG Ally / Legion Go | lutowany | M.2 2230 NVMe, wymienny | dysk 2230 (drogi, rzadki format) |
+
+Kart SIM w konsolach nie ma. Największa wartość do wydzielenia zwykle w zestawie: gry fizyczne, dodatkowe pady
+(DualSense Edge, Pro Controller, Joy-Cony), akcesoria (PS VR2, stacje ładujące) – pola `games_included`,
+`controllers_*`, `other_accessories`, sygnał `bundle_value`. Dodatkowe pola: `expansion_storage`
+(typ + pojemność: m2_nvme / xbox_expansion_card / microsd / sata_2_5), `internal_storage_replaced`.

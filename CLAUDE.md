@@ -146,6 +146,9 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
 * **Kategoria RAM (2026-10-14, prośba użytkownika)** – do wyceny konfiguracji laptopów i strategii „rozbiórki”
   (ATRYBUTY.md §6: z = x + y − zakup − c). **Czeka na cURL kategorii od użytkownika** (catalog_id nieznany; DIMM vs
   SO-DIMM). Propozycja: próg 100 zł, bez details każdej oferty (parametry w tytule).
+  **Kategoria dysków (2026-10-14)** – rozbiórka dysków (np. 2 TB NVMe → 512 GB): czeka na cURL; pola: forma
+  (M.2 2280/2242/2230, 2,5" SATA), interfejs (NVMe PCIe 3/4/5, SATA), pojemność, zużycie (TBW / health %).
+  Konsole: tabela części do wyjęcia w ATRYBUTY_KONSOLE.md §16.
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
