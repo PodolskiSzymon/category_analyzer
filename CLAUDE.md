@@ -57,7 +57,7 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   `total_entries` → za duża partycja dzielona; bez `total_entries` – przepełnienie = pełna ostatnia dozwolona strona;
   wznawianie przerwanego przejścia; 429 → przerwa), `diff.py` (migawka: `missed_runs`, `gone_pending`; oferty
   w partycjach oversize pomijane), `probe.py` (etap 0), CLI `probe | crawl | status`.
-* **Testy**: `analyzer/tests` – 79 testów (w tym klasyfikacja kategorii mieszanych (41 tytułów), migracja v7, dwie kategorie w jednej bazie, próg ceny per kategoria, kraj sprzedawcy, dryf kursów, details, cena minimalna, kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
+* **Testy**: `analyzer/tests` – 81 testów (w tym klasyfikacja kategorii mieszanych (41 tytułów), migracja v7, dwie kategorie w jednej bazie, próg ceny per kategoria, kraj sprzedawcy, dryf kursów, details, cena minimalna, kontrola pokrycia, resolver na prawdziwych odpowiedziach, probe na atrapie HTTP i parser na prawdziwej pozycji katalogu), syntetyczny rynek (`tests/fakes.py`): pełne pokrycie z i bez
   `pagination`, z `price_to` włącznie i wyłącznie, ponowne przejście (zmiana ceny, rezerwacja, zniknięcie →
   `gone_pending` po 2 przejściach, powrót), cena z liczbą ofert > limit (oversize), wznawianie po błędach.
   Atrapa 50 tys. ofert: wszystkie zebrane, 653 zapytania (minimum 521), drugie przejście 575.
