@@ -697,6 +697,22 @@ def test_details_only_for_selected_catalogs(monkeypatch):
     ("Fan Edition Galaxy S20 FE", "phone"),
     ("RTX A2000 12GB", "gpu"),
     ("Kingston A2000 1TB NVMe", "storage"),
+    # classify-report po reclassify (2026-10-15)
+    ("WD Red 500 SA500", "storage"),
+    ("asus strix 1050 Ti 4gb", "gpu"),
+    ("Saphire r9 280x", "gpu"),
+    ("Amd ATI Radeon HD5770 Mac Edition", "gpu"),
+    ("2 placi video pe slot AGP", "gpu"),
+    ("Vând hard-disk Seagate 3 TB", "ignored"),
+    ("Hard extern 500GB", "ignored"),
+    ("WD elements AE 4tb", "ignored"),
+    ("Corsair Tx 650 m source", "ignored"),
+    ("Ventilatoare Lian Li Uni Fan wireless LCD 120 ,3 pack", "ignored"),
+    ("Corsair iCUE 220T tower case", "ignored"),
+    ("Datorchassi ATX", "ignored"),
+    ("PC zdroj", "ignored"),
+    ("Elgato Stream Deck", "ignored"),
+    ("Steam Deck 64GB", "console"),
 ])
 def test_classify_titles(title, expected):
     from analyzer.classify import classify_text

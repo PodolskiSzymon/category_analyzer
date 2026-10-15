@@ -55,16 +55,18 @@ STRONG_JUNK = _words(
     r"napajanj\w*", r"stromforsyning\w*", r"nataggregat\w*", r"alimentation", r"alimentator\w*",
     r"voeding\w*",
     # chłodzenie
-    r"chlodnic\w*", r"aio", r"liquid\s+freezer\w*", r"\w*hutes\w*", r"ausintuv\w*", r"flakt\w*", r"ventilator\w*",
+    r"chlodnic\w*", r"aio", r"liquid\s+freezer\w*", r"\w*hutes\w*", r"ausintuv\w*", r"flakt\w*", r"ventilato\w*",
     r"ventilatory", r"fans", r"fan\s+\d+\s*mm", r"shield\s+tv", r"kuhler\w*", r"chladic\w*", r"chladeni\w*", r"vodni\s+chlazeni", r"dissipator\w*",
     r"galahad\w*", r"hyper\s*212",
     # HDD (CZ/SK „pevný disk”, HR „tvrdi disk”, HU „merevlemez”, DE, RO, LT, DK …) i stare dyski
-    r"harddisk\w*", r"hard\s*disk\w*", r"hard\s*drive\w*", r"tvrd\w*\s+disk\w*", r"pevn\w*\s+disk\w*", r"merevlemez\w*",
+    r"harddisk\w*", r"hard\s*-?\s*disk\w*", r"hard\s*-?\s*extern\w*", r"my\s*cloud", r"wd\s+elements",
+    r"elements\s+(?:desktop|portable)", r"mg0\d\w*", r"hard\s*drive\w*", r"tvrd\w*\s+disk\w*", r"pevn\w*\s+disk\w*", r"merevlemez\w*",
     r"festplatte\w*", r"hhd", r"kietas\w*\s+disk\w*", r"disco\s+(?:duro|rigido)", r"medalist", r"quantum",
-    r"exos", r"wd\s+(?:blue|red|purple|green|gold)(?!\s+(?:sn|ssd|nvme|m\.?2|sa\d))", r"skyhawk", r"ultrastar",
+    r"exos", r"wd\s+(?:blue|red|purple|green|gold)(?!.*(?:\bsn\d|\bsa\d|ssd|nvme|m\.?2))", r"skyhawk", r"ultrastar",
     # pamięć flash, karty dźwiękowe, NAS, powerbanki
     r"flashk\w*", r"usb\s+flash\w*", r"karta?\s+dzwiekow\w*", r"sound\s*blaster\w*", r"sound\s*card", r"synology",
-    r"qnap", r"nas", r"powerbank\w*", r"power\s*bank",
+    r"qnap", r"nas", r"nvr", r"dvr", r"microsoft\s+365", r"office\s+20\d\d", r"stream\s*deck", r"elgato",
+    r"capture\s+card", r"tower\s+case", r"\w*chassi\w*", r"source", r"zdroj\w*", r"ljudkort\w*", r"lydkort\w*", r"powerbank\w*", r"power\s*bank",
 )
 # Procesory i płyty główne (osobno, żeby „Laptop i5-8250U” nie był odrzucany – procesory laptopowe H/U/HS/HX
 # nie pasują do wzorców poniżej).
@@ -105,7 +107,8 @@ TABLET = _words(r"tablet\w*", r"ipad\w*", r"galaxy\s+tab\w*", r"surface\s+(?:pro
 # 5. Podzespoły, które zbieramy.
 GPU = _words(r"rtx\s*\d{3,4}\w*", r"gtx\s*\d{3,4}\w*", r"geforce", r"radeon\s+(?:rx|r9|vii|pro)\w*", r"rx\s*\d{3,4}\s*(?:xt|xtx)?",
              r"karta?\s+graficzn\w*", r"kart\w*\s+graficzn\w*", r"grafik\w*", r"graphics\s+card", r"gpu", r"quadro\w*",
-             r"rtx\s*a\d{3,4}", r"arc\s+a\d{3}", r"titan\s+(?:x|rtx|v)\w*", r"3dfx", r"voodoo\s*\d?",
+             r"rtx\s*a\d{3,4}", r"arc\s+a\d{3}", r"plac\w*\s+video", r"r[79]\s*\d{3}x?", r"radeon\s+hd\s*\d{4}",
+             r"\d{4}\s*ti", r"titan\s+(?:x|rtx|v)\w*", r"3dfx", r"voodoo\s*\d?",
              r"vaizdo\s+plokst\w*", r"videokart\w*", r"videokaart\w*", r"grafikkart\w*", r"graficka\s+kart\w*",
              r"placa\s+(?:video|grafica|de\s+video)", r"carte\s+graphique", r"scheda\s+video", r"grafikus\s+kartya",
              r"videokartya", r"graficna\s+kartic\w*")
