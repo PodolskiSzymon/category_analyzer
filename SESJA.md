@@ -59,7 +59,7 @@ Chromium ──(bez hasła)──> 127.0.0.1:<port>  ProxyRelay ──(+ Proxy-A
 
 Przekaźnik czyta pierwszą odpowiedź proxy: **407** = złe dane logowania albo brak transferu na koncie →
 `[RELAY] ... odrzucił dane logowania (407 ...)` i od razu `SessionExpired` (kolejne próby nic by nie dały).
-Uwaga: tekst komunikatu wymienia IPRoyal, ale dotyczy każdego dostawcy wpisanego w `SNIPER_PROXY_HOST`.
+Komunikat jest wspólny dla każdego dostawcy wpisanego w `SNIPER_PROXY_HOST` (IPRoyal, Evomi …).
 Przekaźnik liczy też bajty przeglądarki (`[TRANSFER]`, pozycja `browser`).
 
 Dane logowania: `SNIPER_PROXY_HOST=host:port` + `SNIPER_PROXY_AUTH=login:hasło` (koniecznie z dwukropkiem)

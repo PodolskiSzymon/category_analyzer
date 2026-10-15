@@ -165,9 +165,16 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   100 – `ANALYZER_PRICE_MIN_GPU|RAM|STORAGE`); kategorie mieszane crawlowane od 100 zł.
   `classify-report` (udział nasze / nierozpoznane / odrzucone + przykłady) i `reclassify` (po poprawce reguł, bez
   sieci). Details: `ANALYZER_DETAILS_CATEGORIES` (domyślnie wszystkie nasze kategorie; dawne
-  `ANALYZER_DETAILS_CATALOGS` z numerami nadal działa). **AI do nierozpoznanych – jeszcze nie**: decyzja po pierwszym
-  `classify-report` (crawl i tak pobiera każdą stronę katalogu; klasyfikacja oszczędza tylko details/resolve
-  i tokeny; nierozpoznane nic nie kosztują, dopóki są `unclassified`).
+  `ANALYZER_DETAILS_CATALOGS` z numerami nadal działa). **AI do nierozpoznanych – NIE (decyzja 2026-10-15)**
+  po pierwszym `classify-report` (3582: 31,8 tys. ofert, nasze 42%, nierozpoznane 32%; 3583/3584: nierozpoznane
+  ~60%): nierozpoznane to prawie same części spoza zakresu po obcemu (procesory, płyty „alaplap/zakladna doska”,
+  zasilacze „sursa/tápegység”, chłodzenie, HDD „pevný/tvrdi disk”) → zamiast AI reguły: słowa w ~10 językach,
+  numery modeli (Ryzen/Intel desktop, chipsety płyt, Samsung MZ…, Legend 720, FireCuda), a wybór reguły =
+  słowo, które pada w tytule NAJWCZEŚNIEJ („Laptop Dell + zasilacz” = laptop, „Zasilacz Dell” = część); procesor
+  laptopowy (H/HS/HX/U) = laptop. AI nie oszczędza proxy (crawl i tak pobiera każdą stronę), a `unclassified` ma
+  historię cen w `observations` – po miesiącu można je sklasyfikować offline (reguły / AI wsadowo na samych
+  tytułach, grosze), `reclassify` przywraca stan `active`, a zniknięte pójdą przez resolver (sidebar sprzedanej
+  działa i później).
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze

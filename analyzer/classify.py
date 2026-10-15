@@ -7,14 +7,13 @@ do istniejących kategorii (`laptop`, `console`, `phone`, `tablet`). Reszta = `i
 szczegółów, nie sprawdzamy zniknięć). Nierozpoznane = `unknown` (stan `unclassified`, bez kosztu proxy) – do raportu
 `classify-report`, poprawy reguł (`reclassify`, offline) albo później AI.
 
-Kolejność reguł ma znaczenie:
-  1. zwroty „do laptopa”, „na PS5”, „for laptop” są usuwane przed szukaniem urządzeń („RAM do laptopa” = RAM),
-  2. ewidentne akcesoria / części, których nie zbieramy („podstawka chłodząca”, „torba”, „HDD”) → ignored,
-  3. komputery stacjonarne → ignored (nie zbieramy),
-  4. urządzenia: laptop, konsola, telefon, tablet (przed podzespołami – „Laptop RTX 3060” to laptop),
-  5. podzespoły: gpu, ram, storage; gra → ignored,
-  6. słabe słowa „śmieciowe” (klawiatura, mysz, kabel…) → ignored,
-  7. reszta → unknown.
+Wybór reguły (od 2026-10-15): zwroty „do laptopa”, „na PS5”, „for laptop” są usuwane („RAM do laptopa” = RAM),
+potem wygrywa reguła, której słowo pada w tytule NAJWCZEŚNIEJ (remis → kolejność RULES). Dzięki temu
+„Laptop Dell + zasilacz” to laptop, a „Zasilacz Dell Latitude” / „Bateria MacBook” – część (ignored).
+Ogólne „dysk” bez SSD/NVMe sprawdzane na końcu (FALLBACK). Słowa także po czesku, słowacku, litewsku, węgiersku,
+rumuńsku, chorwacku, niemiecku, skandynawsku – na polskim Vinted jest dużo ofert zagranicznych.
+Ignored: akcesoria i części spoza zakresu, procesory, płyty główne, zasilacze, chłodzenie, HDD, komputery
+stacjonarne, gry; reszta → unknown.
 """
 import re
 import unicodedata
@@ -41,8 +40,7 @@ STRONG_JUNK = _words(
     r"ladowark\w*", r"charger", r"zasilacz\w*", r"psu", r"power\s*supply", r"kabel\w*", r"kable", r"cable\w*",
     r"przewod\w*", r"adapter\w*", r"przejsciowk\w*", r"hub\w*", r"stacj\w*\s+dokujac\w*", r"docking", r"obudow\w*",
     r"wentylator\w*", r"chlodzeni\w*", r"cooler\w*", r"radiator\s+do", r"pasta\s+termo\w*", r"termopad\w*",
-    r"tasm\w*", r"raspberry", r"arduino", r"plyt\w*\s+glown\w*", r"motherboard", r"mainboard", r"procesor\w*",
-    r"cpu", r"matryc\w*", r"bateri\w*", r"akumulator\w*", r"klawisz\w*", r"zawias\w*", r"glosnik\w*",
+    r"tasm\w*", r"raspberry", r"arduino", r"matryc\w*", r"bateri\w*", r"akumulator\w*", r"klawisz\w*", r"zawias\w*", r"glosnik\w*",
     r"hdd", r"dysk\w*\s+tward\w*", r"\d{4}\s*rpm", r"barracuda", r"ironwolf", r"wd\s+(?:blue|red|purple)\s+\d+\s*tb",
     r"pendrive\w*", r"pen\s*drive", r"flash\s*drive", r"usb\s+stick", r"karta?\s+(?:pamieci\s+)?(?:micro\s*)?sd\w*",
     r"microsd\w*", r"sdxc", r"sdhc", r"karta?\s+sim", r"sim\s*card", r"plyt\w*\s+(?:cd|dvd|blu)\w*", r"cd-r\w*",
@@ -52,6 +50,33 @@ STRONG_JUNK = _words(
     r"karta?\s+sieciow\w*", r"wifi\s+card", r"modul\w*\s+wi-?fi", r"antena\w*", r"oprogramowani\w*", r"licencj\w*",
     r"windows\s+(?:10|11)\s+(?:pro|home)\s+klucz", r"klucz\s+(?:aktywacyjn|licencyj)\w*", r"gamepad\w*",
     r"dysk\w*\s+zewnetrzn\w*(?!.*\bssd)", r"external\s+(?:hard\s+)?drive(?!.*\bssd)",
+    # zasilacze (RO, HU, CZ/SK, LT, DE, HR, DK/NO, SE, FR, IT, NL)
+    r"sursa\w*", r"tapegyseg\w*", r"napajec\w*", r"napajeni\w*", r"maitinimo\s+blok\w*", r"netzteil\w*",
+    r"napajanj\w*", r"stromforsyning\w*", r"nataggregat\w*", r"alimentation", r"alimentator\w*",
+    r"voeding\w*",
+    # chłodzenie
+    r"chlodnic\w*", r"aio", r"liquid\s+freezer\w*", r"\w*hutes\w*", r"ausintuv\w*", r"flakt\w*", r"ventilator\w*",
+    r"ventilatory", r"fans", r"fan\s+\d+\s*mm", r"shield\s+tv", r"kuhler\w*", r"chladic\w*", r"chladeni\w*", r"vodni\s+chlazeni", r"dissipator\w*",
+    r"galahad\w*", r"hyper\s*212",
+    # HDD (CZ/SK „pevný disk”, HR „tvrdi disk”, HU „merevlemez”, DE, RO, LT, DK …) i stare dyski
+    r"harddisk\w*", r"hard\s*disk\w*", r"hard\s*drive\w*", r"tvrd\w*\s+disk\w*", r"pevn\w*\s+disk\w*", r"merevlemez\w*",
+    r"festplatte\w*", r"hhd", r"kietas\w*\s+disk\w*", r"disco\s+(?:duro|rigido)", r"medalist", r"quantum",
+    r"exos", r"wd\s+(?:blue|red|purple|green|gold)(?!\s+(?:sn|ssd|nvme|m\.?2|sa\d))", r"skyhawk", r"ultrastar",
+    # pamięć flash, karty dźwiękowe, NAS, powerbanki
+    r"flashk\w*", r"usb\s+flash\w*", r"karta?\s+dzwiekow\w*", r"sound\s*blaster\w*", r"sound\s*card", r"synology",
+    r"qnap", r"nas", r"powerbank\w*", r"power\s*bank",
+)
+# Procesory i płyty główne (osobno, żeby „Laptop i5-8250U” nie był odrzucany – procesory laptopowe H/U/HS/HX
+# nie pasują do wzorców poniżej).
+PARTS = _words(
+    r"procesor\w*", r"processzor\w*", r"processor\w*", r"procesad\w*", r"cpu", r"xeon", r"athlon\w*",
+    r"ryzen\s*(?:[3579]\s*)?\d{4}(?:x3d|xt|x|g|ge|f|af)?(?![a-z0-9])",
+    r"(?:core\s*)?i[3579]\s*-?\s*\d{4,5}(?:k|kf|f|t|ks|te)?(?![a-z0-9])",
+    r"plyt\w*\s+glown\w*", r"motherboard\w*", r"mainboard\w*", r"alaplap\w*", r"zakladn\w*\s+dosk\w*",
+    r"zakladni\s+desk\w*", r"maticn\w*\s+ploc\w*", r"placa\s+(?:de\s+baza|base|madre)", r"moderkort\w*",
+    r"materska\s+dosk\w*", r"pagrindin\w*\s+plokst\w*", r"scheda\s+madre", r"carte\s+mere",
+    r"(?:a320|a520|a620|b350|b450|b550|b650|b840|b850|x370|x470|x570|x670|x870|h61|h81|h110|h310|h410|h510|h610|"
+    r"b250|b360|b365|b460|b560|b660|b760|b860|z170|z270|z370|z390|z490|z590|z690|z790|z890|x99|x299)\w*",
 )
 # 3. Komputery stacjonarne (nie zbieramy – użytkownik 2026-10-14).
 DESKTOP = _words(r"komputer[a-z]*(?![a-z])(?!\s+przenosn)", r"optiplex", r"prodesk", r"elitedesk", r"thinkcentre",
@@ -66,7 +91,9 @@ LAPTOP = _words(r"laptop\w*", r"komputer\w*\s+przenosn\w*", r"notebook\w*", r"ne
                 r"legion\s+(?:\d|pro|slim|y\d)\w*", r"omen\s+\d+", r"victus", r"pavilion", r"envy\s+x360", r"spectre",
                 r"predator\s+helios", r"helios", r"nitro\s+[5v]", r"aspire", r"swift\s+\d", r"inspiron", r"xps\s+1[3-7]",
                 r"alienware\s+[mx]\d+", r"katana", r"raider", r"stealth", r"razer\s+blade", r"matebook\w*",
-                r"surface\s+(?:laptop|book)", r"galaxy\s+book\w*", r"lg\s+gram")
+                r"surface\s+(?:laptop|book)", r"galaxy\s+book\w*", r"lg\s+gram", r"tuf\s+(?:gaming|dash)",
+                # procesor laptopowy (H/HS/HX/HK/HQ/U) w tytule = laptop („Asus TUF Ryzen 7 4800H RTX 3050”)
+                r"(?:i[3579]|ryzen\s*[3579])\s*-?\s*\d{4,5}(?:h|hs|hx|hk|hq|u)(?![a-z0-9])")
 # Sama nazwa platformy („FIFA 23 PS4”) to zwykle gra – konsola dopiero z wersją / pojemnością / słowem „konsola”.
 CONSOLE = _words(r"konsol\w*", r"console\w*", r"steam\s*deck", r"rog\s+ally", r"legion\s+go", r"ps\s*vita",
                  r"xbox\s+series\s+[xs]",
@@ -78,13 +105,22 @@ TABLET = _words(r"tablet\w*", r"ipad\w*", r"galaxy\s+tab\w*", r"surface\s+(?:pro
 # 5. Podzespoły, które zbieramy.
 GPU = _words(r"rtx\s*\d{3,4}\w*", r"gtx\s*\d{3,4}\w*", r"geforce", r"radeon\s+(?:rx|r9|vii|pro)\w*", r"rx\s*\d{3,4}\s*(?:xt|xtx)?",
              r"karta?\s+graficzn\w*", r"kart\w*\s+graficzn\w*", r"grafik\w*", r"graphics\s+card", r"gpu", r"quadro\w*",
-             r"rtx\s*a\d{3,4}", r"arc\s+a\d{3}", r"titan\s+(?:x|rtx|v)\w*")
+             r"rtx\s*a\d{3,4}", r"arc\s+a\d{3}", r"titan\s+(?:x|rtx|v)\w*", r"3dfx", r"voodoo\s*\d?",
+             r"vaizdo\s+plokst\w*", r"videokart\w*", r"videokaart\w*", r"grafikkart\w*", r"graficka\s+kart\w*",
+             r"placa\s+(?:video|grafica|de\s+video)", r"carte\s+graphique", r"scheda\s+video", r"grafikus\s+kartya",
+             r"videokartya", r"graficna\s+kartic\w*")
 RAM = _words(r"ram", r"ddr[2345]\w*", r"so-?dimm\w*", r"dimm\w*", r"pamiec\w*\s+(?:ram|operacyjn\w*)", r"memory\s+kit",
-             r"(?:fury|vengeance|ripjaws|trident\s*z|viper\s+(?:venom|steel|elite)|ballistix|dominator|xpg\s+lancer|lancer)\w*")
+             r"(?:fury|vengeance|ripjaws|trident\s*z|viper\s+(?:venom|steel|elite)|ballistix|dominator|xpg\s+lancer|lancer)\w*",
+             r"operatyv\w*\s+atmint\w*", r"memori\w*\s+ram", r"arbeitsspeicher\w*", r"operacn\w*\s+pam\w*",
+             r"rendszermemori\w*", r"radn\w*\s+memorij\w*", r"pamat\s+ram")
 STORAGE = _words(r"nvme\w*", r"m\.?2", r"ssd\w*", r"pcie\s*[345]\.?0?", r"(?:970|980|990)\s*(?:evo|pro)\w*",
                  r"sn\d{3}\w*", r"kc3000", r"nv[123]", r"a2000", r"p[35]\s*plus", r"mx500", r"t[579]\s*(?:shield)?",
-                 r"karta?\s+rozszerze\w*", r"expansion\s+card", r"storage\s+expansion", r"dysk\w*\s+(?:do|na)\s+(?:ps5|xbox)",
-                 r"dysk\w*")
+                 r"karta?\s+rozszerze\w*", r"expansion\s+card", r"storage\s+expansion", r"legend\s+\d{3}",
+                 r"mz-?[v7n][0-9a-z]{3,}", r"a400", r"(?:860|870)\s*(?:evo|qvo|pro)", r"(?:bx|mx)500", r"sa\d{3}", r"firecuda\s*\d{3}")
+# Ogólne „dysk” (bez SSD/NVMe/HDD w tytule) - na końcu, gdy nic innego nie pasuje.
+STORAGE_GENERIC = _words(r"dysk\w*")
+# Sama marka NVIDIA (często tylko w polu marki formularza) - też dopiero na końcu („Nvidia Shield TV” to nie karta).
+GPU_BRAND = _words(r"nvidia")
 GAME = _words(r"gra", r"gry", r"game\w*", r"(?:ps[345]|xbox|switch|pc)\s+(?:gra|game)", r"steelbook\w*",
               r"(?:fifa|fc\s*2[4-6]|gta|call\s+of\s+duty|minecraft|zelda|mario|pokemon|elden\s+ring|spider-?man|"
               r"god\s+of\s+war|horizon|cyberpunk|red\s+dead|witcher|wiedzmin)\w*")
@@ -101,12 +137,17 @@ RULES = (
     ("console", "konsola", CONSOLE),
     ("tablet", "tablet", TABLET),
     ("phone", "telefon", PHONE),
+    ("ignored", "procesor/płyta", PARTS),
     ("gpu", "karta graficzna", GPU),
     ("ram", "RAM", RAM),
     ("storage", "dysk SSD/NVMe", STORAGE),
     # Gry odpuszczone 2026-10-14 (użytkownik) - rozpoznajemy je tylko po to, żeby odrzucić.
     ("ignored", "gra (pominięte)", GAME),
     ("ignored", "akcesorium (słabe)", WEAK_JUNK),
+)
+FALLBACK = (
+    ("storage", "dysk (ogólny)", STORAGE_GENERIC),
+    ("gpu", "marka NVIDIA", GPU_BRAND),
 )
 
 
@@ -120,10 +161,16 @@ def normalize(text):
 def classify_text(title, label=""):
     """(kategoria, reguła) dla tytułu (+ marka/model z formularza). Kategoria ∈ WANTED ∪ {ignored, unknown}."""
     text = normalize(f"{title or ''} | {label or ''}")
-    stripped = _TARGET.sub(" ", text)          # „RAM do laptopa” → „RAM”
-    for category, name, pattern in RULES:
-        source = stripped if category in ("laptop", "console", "tablet", "phone", "ignored") else text
-        match = pattern.search(source)
+    text = _TARGET.sub(" ", text)              # „RAM do laptopa” → „RAM”
+    best = None
+    for order, (category, name, pattern) in enumerate(RULES):
+        match = pattern.search(text)
+        if match and (best is None or match.start() < best[0]):
+            best = (match.start(), order, category, f"{name}: {match.group(0)}")
+    if best:
+        return best[2], best[3]
+    for category, name, pattern in FALLBACK:
+        match = pattern.search(text)
         if match:
             return category, f"{name}: {match.group(0)}"
     return "unknown", None

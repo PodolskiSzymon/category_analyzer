@@ -15,10 +15,11 @@ log = logging.getLogger("sniper.proxy_relay")
 _HEADER_LIMIT = 64 * 1024
 
 PROXY_AUTH_HELP = (
-    "IPRoyal odrzucił dane logowania (407 Proxy Authentication Required). Sprawdź: "
-    "1) saldo transferu / ważność planu w panelu IPRoyal, "
-    "2) SNIPER_PROXY_AUTH (LOGIN:HASLO_country-pl) w sniper/.env - literówka albo nowe hasło, "
-    "3) ograniczenia dostępu (whitelist IP) w ustawieniach IPRoyal."
+    "Proxy odrzuciło dane logowania (407 Proxy Authentication Required). Sprawdź: "
+    "1) saldo transferu / ważność planu u dostawcy proxy (SNIPER_PROXY_HOST), "
+    "2) SNIPER_PROXY_AUTH w sniper/.env - format LOGIN:HASLO (z dwukropkiem; IPRoyal: HASLO_country-pl, "
+    "Evomi: HASLO_country-PL), literówka albo nowe hasło, "
+    "3) ograniczenia dostępu (whitelist IP) w panelu dostawcy."
 )
 
 
