@@ -233,6 +233,9 @@ def report(conn, examples=40):
     if checks:
         lines.append("Zdjęcie przez AI (RAM + inna kategoria w tytule): "
                      + ", ".join(f"{r[0]} {r[1]}" for r in checks))
+        for r in conn.execute(f"SELECT title, category, category_rule FROM listings WHERE catalog_id IN ({marks}) "
+                              "AND category_src='ai' ORDER BY state_at DESC LIMIT 15", MIXED_CATALOGS):
+            lines.append(f"    {r['category']:<8} {(r['title'] or '')[:60]:<60}  ← {r['category_rule']}")
     lines.append("")
     lines.append("Najczęstsze reguły odrzucenia:")
     for r in conn.execute(f"""SELECT substr(category_rule, 1, instr(category_rule || ':', ':') - 1) || ': ' ||
