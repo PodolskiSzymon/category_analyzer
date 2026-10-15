@@ -13,6 +13,7 @@
 import argparse
 import asyncio
 import logging
+import sqlite3
 from pathlib import Path
 
 from . import db
@@ -222,9 +223,17 @@ def main(argv=None):
         show(args.folder)
     elif args.command in ("classify-report", "reclassify"):
         from . import classify
-        conn = db.connect(cfg.db_path)
+        print(f"Otwieram bazę {cfg.db_path} ...", flush=True)
+        try:
+            conn = db.connect(cfg.db_path)
+            if args.command == "reclassify":
+                changes = classify.reclassify(conn, cfg.category_min, progress=lambda t: print(t, flush=True))
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc):
+                raise
+            raise SystemExit("Baza zajęta przez inny proces (pewnie watch w trakcie zapisu) - spróbuj za chwilę "
+                             "albo zatrzymaj watch (Ctrl+C) i uruchom ponownie.")
         if args.command == "reclassify":
-            changes = classify.reclassify(conn, cfg.category_min)
             print("Zmiany kategorii: " + (", ".join(f"{a} → {b}: {n}" for (a, b), n in sorted(changes.items()))
                                           or "brak"))
         print("\n".join(classify.report(conn)))

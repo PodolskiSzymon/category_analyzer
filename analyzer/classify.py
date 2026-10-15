@@ -228,32 +228,42 @@ def report(conn, examples=40):
     return lines
 
 
-def reclassify(conn, min_for=None):
+def reclassify(conn, min_for=None, progress=None, chunk=2000):
     """Ponownie stosuje reguły do zapisanych ofert z kategorii mieszanych (category_src = rule). Bez sieci - po poprawce
-    reguł nie trzeba nic pobierać. Zwraca {(stara, nowa): liczba}."""
+    reguł nie trzeba nic pobierać. Zwraca {(stara, nowa): liczba}.
+
+    Najpierw liczy wszystko bez blokady bazy, potem zapisuje porcjami po `chunk` wierszy (krótkie transakcje - może
+    działać równolegle z `watch`). progress(tekst) - opcjonalne komunikaty o postępie."""
     from .db import REVIVABLE, utcnow
 
+    say = progress or (lambda _text: None)
     marks = ",".join("?" * len(MIXED_CATALOGS))
     changes = {}
     now = utcnow()
     rows = conn.execute(f"SELECT id, title, brand, model, category, state, price_now FROM listings "
                         f"WHERE catalog_id IN ({marks}) AND category_src='rule'", MIXED_CATALOGS).fetchall()
-    with conn:
-        for r in rows:
-            label = " ".join(x for x in (r["brand"], r["model"]) if x)
-            category, rule = classify_text(r["title"], label)
-            if category == r["category"]:
-                continue
-            if category == "ignored":
-                state = "ignored"
-            elif category == "unknown":
-                state = "unclassified"
-            else:
-                low = min_for(category) if min_for else 0
-                state = "below_min" if low and (r["price_now"] or 0) < low else "active"
-            if r["state"] not in REVIVABLE:
-                state = r["state"]
-            conn.execute("UPDATE listings SET category=?, category_rule=?, state=?, state_at=? WHERE id=?",
-                         (category, rule, state, now, r["id"]))
-            changes[(r["category"], category)] = changes.get((r["category"], category), 0) + 1
+    say(f"Ofert z kategorii mieszanych: {len(rows)} - klasyfikuję...")
+    updates = []
+    for r in rows:
+        label = " ".join(x for x in (r["brand"], r["model"]) if x)
+        category, rule = classify_text(r["title"], label)
+        if category == r["category"]:
+            continue
+        if category == "ignored":
+            state = "ignored"
+        elif category == "unknown":
+            state = "unclassified"
+        else:
+            low = min_for(category) if min_for else 0
+            state = "below_min" if low and (r["price_now"] or 0) < low else "active"
+        if r["state"] not in REVIVABLE:
+            state = r["state"]
+        updates.append((category, rule, state, now, r["id"]))
+        changes[(r["category"], category)] = changes.get((r["category"], category), 0) + 1
+    say(f"Do zmiany: {len(updates)} - zapisuję...")
+    for start in range(0, len(updates), chunk):
+        with conn:
+            conn.executemany("UPDATE listings SET category=?, category_rule=?, state=?, state_at=? WHERE id=?",
+                             updates[start:start + chunk])
+        say(f"  zapisano {min(start + chunk, len(updates))}/{len(updates)}")
     return changes
