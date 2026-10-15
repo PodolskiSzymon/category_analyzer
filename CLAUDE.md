@@ -175,6 +175,14 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   historię cen w `observations` – po miesiącu można je sklasyfikować offline (reguły / AI wsadowo na samych
   tytułach, grosze), `reclassify` przywraca stan `active`, a zniknięte pójdą przez resolver (sidebar sprzedanej
   działa i później).
+* **RAM ze zdjęcia przez AI (2026-10-15, prośba użytkownika)**: gdy tytuł z kategorii mieszanych pasuje do RAM-u
+  i do innej kategorii (`classify.needs_photo_check`: „Laptop 16GB RAM”, „Płyta + procesor + RAM”), o kategorii
+  decyduje AI ze zdjęcia głównego (`analyzer/ai_classify.py`), a nie kolejność słów. Migracja v8:
+  `listings.category_check` (pending / done / failed); do czasu odpowiedzi kategoria z reguł. Zdjęcie jako URL –
+  pobiera dostawca AI, bez proxy. Dostawca/klucz z `SNIPER_AI_*`, model `ANALYZER_AI_MODEL` (domyślnie
+  gemini-3.8-flash / claude-haiku-5-5), cache `ai_cache` (task `photo_category_v1`), wynik `category_src='ai'`.
+  W `watch` po przejściu katalogów (limit `ANALYZER_AI_CLASSIFY_LIMIT`=500/cykl); ręcznie `classify-ai
+  [--limit N] [--retry-failed]`; `reclassify` oznacza konflikty w starych ofertach.
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze

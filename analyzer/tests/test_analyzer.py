@@ -779,3 +779,123 @@ def test_migration_v7_sets_category_from_catalog():
     db.migrate(conn)
     cats = dict(conn.execute("SELECT id, category FROM listings").fetchall())
     assert cats == {1: "laptop", 2: "phone"}
+
+
+# ------------------------------------------------------------------ RAM: kategoria ze zdjęcia (ai_classify)
+
+@pytest.mark.parametrize("title,expected", [
+    ("Laptop Dell Latitude 16GB RAM", True),
+    ("Płyta główna + procesor + RAM 16GB", True),
+    ("RAM DDR4 8GB z laptopa", False),           # „z laptopa” usuwane - sam RAM
+    ("Pamięć RAM DDR5 32GB 2x16", False),
+    ("Karta graficzna GTX 1060", False),
+    ("Pamięć RAM DDR4 8GB laptop", True),
+])
+def test_needs_photo_check(title, expected):
+    from analyzer.classify import needs_photo_check
+    assert needs_photo_check(title) is expected
+
+
+class FakeAiBackend:
+    model = "fake-model"
+
+    def __init__(self, answers):
+        self.answers, self.calls = answers, []
+
+    async def ask(self, text, photo_url):
+        self.calls.append((text, photo_url))
+        answer = self.answers[len(self.calls) - 1]
+        if isinstance(answer, Exception):
+            raise answer
+        return json.dumps(answer), (300, 20)
+
+    async def close(self):
+        pass
+
+
+def test_ai_photo_decides_ram_conflicts():
+    from analyzer.ai_classify import classify_photos
+
+    market = FakeMarket([400, 1500, 300, 250])
+    ids = sorted(market.items)
+    market.titles = {ids[0]: "Pamięć RAM DDR4 8GB laptop", ids[1]: "Laptop Dell Latitude 16GB RAM",
+                     ids[2]: "Płyta główna + procesor + RAM", ids[3]: "Pamięć RAM DDR5 32GB 2x16"}
+    cfg = make_cfg(price_min=None)
+    conn, _, _, _ = crawl(cfg, market, catalog_id=3582)
+    pending = {r[0] for r in conn.execute("SELECT id FROM listings WHERE category_check='pending'")}
+    assert pending == {ids[0], ids[1], ids[2]}                       # sam RAM bez konfliktu - bez AI
+
+    # kolejność kandydatów: najnowsze ID najpierw (ids[2], ids[1], ids[0])
+    backend = FakeAiBackend([{"item": "parts_bundle", "photo_seen": True, "note": "płyta, procesor i RAM"},
+                             {"item": "laptop", "photo_seen": True, "note": "laptop Dell"},
+                             RuntimeError("HTTP 500")])
+    stats = asyncio.run(classify_photos(cfg, conn, ai_cfg=object(), backend=backend))
+    assert (stats["done"], stats["failed"]) == (2, 1)
+    rows = {r["id"]: r for r in conn.execute("SELECT * FROM listings")}
+    assert (rows[ids[2]]["category"], rows[ids[2]]["state"], rows[ids[2]]["category_src"]) == ("ignored", "ignored", "ai")
+    assert (rows[ids[1]]["category"], rows[ids[1]]["state"]) == ("laptop", "active")
+    assert rows[ids[0]]["category_check"] == "failed" and rows[ids[0]]["category"] == "ram"   # z reguł zostaje
+
+    # kolejne przejście nie nadpisuje decyzji AI i nie oznacza ponownie do sprawdzenia
+    crawl(cfg, market, conn, catalog_id=3582)
+    assert conn.execute("SELECT category, category_check FROM listings WHERE id=?", (ids[1],)).fetchone()[:] == \
+        ("laptop", "done")
+
+    # ponowienie błędu: odpowiedź „ram”; ta sama treść drugi raz - z cache, bez wywołania
+    backend = FakeAiBackend([{"item": "ram", "photo_seen": True, "note": "dwie kości SO-DIMM"}])
+    asyncio.run(classify_photos(cfg, conn, ai_cfg=object(), backend=backend, retry_failed=True))
+    assert conn.execute("SELECT category, category_check FROM listings WHERE id=?", (ids[0],)).fetchone()[:] == \
+        ("ram", "done")
+    conn.execute("UPDATE listings SET category_check='pending', category_src='rule' WHERE id=?", (ids[0],))
+    backend = FakeAiBackend([])
+    stats = asyncio.run(classify_photos(cfg, conn, ai_cfg=object(), backend=backend))
+    assert stats["cached"] == 1 and backend.calls == []
+
+
+def test_ai_photo_without_key_keeps_rules():
+    from analyzer.ai_classify import classify_photos
+
+    class NoKey:
+        api_key = ""
+        provider = "gemini"
+
+    market = FakeMarket([1500])
+    market.titles = {next(iter(market.items)): "Laptop Dell 16GB RAM"}
+    cfg = make_cfg(price_min=None)
+    conn, _, _, _ = crawl(cfg, market, catalog_id=3582)
+    stats = asyncio.run(classify_photos(cfg, conn, ai_cfg=NoKey()))
+    assert stats["done"] == 0
+    assert conn.execute("SELECT category_check FROM listings").fetchone()[0] == "pending"
+
+
+def test_ai_anthropic_request_sends_photo_url():
+    from analyzer.ai_classify import Backend, SCHEMA
+
+    class Messages:
+        async def create(self, **kw):
+            self.kw = kw
+            block = type("B", (), {"type": "text", "text": '{"item": "ram", "photo_seen": true, "note": "x"}'})
+            usage = type("U", (), {"input_tokens": 500, "output_tokens": 10})
+            return type("R", (), {"content": [block], "usage": usage})
+
+    class Client:
+        beta = type("Beta", (), {})()
+
+    client = Client()
+    client.beta.messages = Messages()
+    ai_cfg = type("Cfg", (), {"provider": "anthropic", "api_key": "x", "timeout": 10, "photos": "url"})()
+    backend = Backend(ai_cfg, "claude-haiku-5-5", client=client)
+    text, usage = asyncio.run(backend.ask("Tytuł: Laptop 16GB RAM", "https://images1.vinted.net/t/x/f800/1.jpeg"))
+    kw = client.beta.messages.kw
+    assert kw["messages"][0]["content"][0] == {"type": "image", "source": {"type": "url",
+                                               "url": "https://images1.vinted.net/t/x/f800/1.jpeg"}}
+    assert kw["output_config"]["format"]["schema"] == SCHEMA and usage == (500, 10)
+
+
+def test_reclassify_marks_ram_conflicts_pending():
+    from analyzer.classify import reclassify
+    conn = db.connect(":memory:")
+    conn.execute("INSERT INTO listings (id, catalog_id, title, first_seen, last_seen, state, state_at, category, "
+                 "category_src) VALUES (1, 3582, 'Laptop Dell 16GB RAM', 'x', 'x', 'active', 'x', 'laptop', 'rule')")
+    reclassify(conn)
+    assert conn.execute("SELECT category_check FROM listings").fetchone()[0] == "pending"

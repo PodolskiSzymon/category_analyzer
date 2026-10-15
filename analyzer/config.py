@@ -23,6 +23,11 @@ def _env_float(name, default):
     return float(value) if value else default
 
 
+def _env_bool(name, default):
+    value = _env(name).lower()
+    return default if not value else value in ("1", "true", "tak", "yes", "on")
+
+
 def parse_range(text, default):
     """„2-6” -> (2.0, 6.0), „3” -> (3.0, 3.0); puste -> default."""
     text = (text or "").strip()
@@ -118,6 +123,11 @@ class AnalyzerConfig:
     watch_hours: tuple = field(default_factory=lambda: parse_range(_env("ANALYZER_WATCH_HOURS"), (10.0, 14.0)))
     # Niedokończone przejście młodsze niż tyle godzin jest wznawiane zamiast zaczynane od nowa.
     resume_hours: float = _env_float("ANALYZER_RESUME_HOURS", 24.0)
+    # Kategoria ze zdjęcia głównego przez AI, gdy tytuł pasuje do RAM-u i innej kategorii (ai_classify.py).
+    # Dostawca i klucz z SNIPER_AI_*; model ANALYZER_AI_MODEL (puste = tani domyślny dostawcy).
+    ai_classify: bool = _env_bool("ANALYZER_AI_CLASSIFY", True)
+    ai_model: str = _env("ANALYZER_AI_MODEL")
+    ai_classify_limit: int = _env_int("ANALYZER_AI_CLASSIFY_LIMIT", 500)     # ofert na jeden cykl watch
 
     def price_min_for(self, catalog_id):
         """Próg ceny kategorii: ANALYZER_PRICE_MIN_<id> > ANALYZER_PRICE_MIN > DEFAULT_PRICE_MIN > 700."""

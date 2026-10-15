@@ -156,7 +156,14 @@ UPDATE listings SET category = CASE catalog_id WHEN 3580 THEN 'laptop' WHEN 3661
 CREATE INDEX listings_category ON listings(category, state);
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7]
+# v8 (2026-10-15): sprawdzenie kategorii ze zdjęcia głównego przez AI (tytuł pasuje do RAM-u i do innej kategorii).
+# category_check: NULL (niepotrzebne) / pending / done / failed.
+SCHEMA_V8 = """
+ALTER TABLE listings ADD COLUMN category_check TEXT;
+CREATE INDEX listings_check ON listings(category_check);
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8]
 
 
 def utcnow():
@@ -264,19 +271,21 @@ def upsert_item(conn, item, run_id, seen_at, min_for=None):
                        (item.id,)).fetchone()
     category = item.category or CATEGORY_BY_CATALOG.get(item.catalog_id)
     src, rule = item.category_src or "catalog", item.category_rule
+    check = getattr(item, "category_check", None)
     if row is not None and row["category_src"] in KEEP_CATEGORY_SRC:
-        category, src, rule = row["category"], row["category_src"], row["category_rule"]
+        category, src, rule, check = row["category"], row["category_src"], row["category_rule"], None
     state = desired_state(category, item, min_for)
     obs = {k: getattr(item, k) for k in _OBSERVED}
     if row is None:
         conn.execute(
             """INSERT INTO listings (id, catalog_id, title, brand, status_label, currency, photo_url, photo_ts,
                    first_seen, last_seen, last_run_id, state, state_at, seller_hash, favourite_count, view_count, model,
-                   price_now, total_now, seller_country, category, category_src, category_rule)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   price_now, total_now, seller_country, category, category_src, category_rule, category_check)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (item.id, item.catalog_id, item.title, item.brand, item.status_label, item.currency, item.photo_url,
              item.photo_ts, seen_at, seen_at, run_id, state, seen_at, item.seller_hash, item.favourite_count,
-             item.view_count, item.model, item.price, item.total_price, item.seller_country, category, src, rule))
+             item.view_count, item.model, item.price, item.total_price, item.seller_country, category, src, rule,
+             check))
         if state == "ignored":
             return "ignored"
         conn.execute("INSERT INTO observations (listing_id, seen_at, price, total_price, is_reserved, favourite_count)"
@@ -293,12 +302,12 @@ def upsert_item(conn, item, run_id, seen_at, min_for=None):
                seller_hash=COALESCE(seller_hash, ?),
                favourite_count=COALESCE(?, favourite_count), view_count=COALESCE(?, view_count),
                model=COALESCE(?, model), price_now=?, total_now=?, seller_country=COALESCE(?, seller_country),
-               category=?, category_src=?, category_rule=?,
+               category=?, category_src=?, category_rule=?, category_check=COALESCE(category_check, ?),
                state_at=CASE WHEN state != ? THEN ? ELSE state_at END, state=?
            WHERE id=?""",
         (seen_at, run_id, item.title, item.brand, item.status_label, item.currency, item.photo_url, item.photo_ts,
          item.seller_hash, item.favourite_count, item.view_count, item.model, item.price, item.total_price,
-         item.seller_country, category, src, rule, new_state, seen_at, new_state, item.id))
+         item.seller_country, category, src, rule, check, new_state, seen_at, new_state, item.id))
     if new_state == "ignored":
         return "ignored"
     last = last_observation(conn, item.id)

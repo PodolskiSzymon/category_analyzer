@@ -161,22 +161,40 @@ def normalize(text):
     return re.sub(r"\s+", " ", text).strip()
 
 
-def classify_text(title, label=""):
-    """(kategoria, reguła) dla tytułu (+ marka/model z formularza). Kategoria ∈ WANTED ∪ {ignored, unknown}."""
+def _prepare(title, label=""):
     text = normalize(f"{title or ''} | {label or ''}")
-    text = _TARGET.sub(" ", text)              # „RAM do laptopa” → „RAM”
-    best = None
+    return _TARGET.sub(" ", text)              # „RAM do laptopa” → „RAM”
+
+
+def _matches(text):
+    """Wszystkie pasujące reguły: [(pozycja, kolejność, kategoria, opis)] - najwcześniejsze słowo pierwsze."""
+    found = []
     for order, (category, name, pattern) in enumerate(RULES):
         match = pattern.search(text)
-        if match and (best is None or match.start() < best[0]):
-            best = (match.start(), order, category, f"{name}: {match.group(0)}")
-    if best:
-        return best[2], best[3]
+        if match:
+            found.append((match.start(), order, category, f"{name}: {match.group(0)}"))
+    return sorted(found)
+
+
+def classify_text(title, label=""):
+    """(kategoria, reguła) dla tytułu (+ marka/model z formularza). Kategoria ∈ WANTED ∪ {ignored, unknown}."""
+    text = _prepare(title, label)
+    found = _matches(text)
+    if found:
+        return found[0][2], found[0][3]
     for category, name, pattern in FALLBACK:
         match = pattern.search(text)
         if match:
             return category, f"{name}: {match.group(0)}"
     return "unknown", None
+
+
+def needs_photo_check(title, label=""):
+    """True, gdy tytuł pasuje do RAM-u I do innej kategorii („Laptop Dell 16GB RAM”, „Płyta + procesor + RAM”) -
+    wtedy o kategorii decyduje AI ze zdjęcia głównego (ai_classify.py), a nie kolejność słów (prośba użytkownika
+    2026-10-15). Do tego czasu oferta ma kategorię z reguł (tymczasową)."""
+    categories = {category for _, _, category, _ in _matches(_prepare(title, label))}
+    return "ram" in categories and len(categories) > 1
 
 
 def classify_item(item, catalog_id):
@@ -210,6 +228,11 @@ def report(conn, examples=40):
         lines.append("    " + ", ".join(f"{c} {n}" for c, n in cats))
     if not by_catalog:
         return ["Brak ofert z kategorii mieszanych - najpierw crawl."]
+    checks = conn.execute(f"SELECT category_check, COUNT(*) FROM listings WHERE catalog_id IN ({marks}) "
+                          "AND category_check IS NOT NULL GROUP BY category_check", MIXED_CATALOGS).fetchall()
+    if checks:
+        lines.append("Zdjęcie przez AI (RAM + inna kategoria w tytule): "
+                     + ", ".join(f"{r[0]} {r[1]}" for r in checks))
     lines.append("")
     lines.append("Najczęstsze reguły odrzucenia:")
     for r in conn.execute(f"""SELECT substr(category_rule, 1, instr(category_rule || ':', ':') - 1) || ': ' ||
@@ -237,30 +260,24 @@ def reclassify(conn, min_for=None, progress=None, chunk=2000):
 
     Najpierw liczy wszystko bez blokady bazy, potem zapisuje porcjami po `chunk` wierszy (krótkie transakcje - może
     działać równolegle z `watch`). progress(tekst) - opcjonalne komunikaty o postępie."""
-    from .db import REVIVABLE, utcnow
+    from .db import utcnow
 
     say = progress or (lambda _text: None)
     marks = ",".join("?" * len(MIXED_CATALOGS))
     changes = {}
     now = utcnow()
-    rows = conn.execute(f"SELECT id, title, brand, model, category, state, price_now FROM listings "
+    rows = conn.execute(f"SELECT id, title, brand, model, category, state, price_now, category_check FROM listings "
                         f"WHERE catalog_id IN ({marks}) AND category_src='rule'", MIXED_CATALOGS).fetchall()
     say(f"Ofert z kategorii mieszanych: {len(rows)} - klasyfikuję...")
-    updates = []
+    updates, pending = [], []
     for r in rows:
         label = " ".join(x for x in (r["brand"], r["model"]) if x)
+        if r["category_check"] is None and needs_photo_check(r["title"], label):
+            pending.append((r["id"],))
         category, rule = classify_text(r["title"], label)
         if category == r["category"]:
             continue
-        if category == "ignored":
-            state = "ignored"
-        elif category == "unknown":
-            state = "unclassified"
-        else:
-            low = min_for(category) if min_for else 0
-            state = "below_min" if low and (r["price_now"] or 0) < low else "active"
-        if r["state"] not in REVIVABLE:
-            state = r["state"]
+        state = state_for(category, r["state"], r["price_now"], min_for)
         updates.append((category, rule, state, now, r["id"]))
         changes[(r["category"], category)] = changes.get((r["category"], category), 0) + 1
     say(f"Do zmiany: {len(updates)} - zapisuję...")
@@ -269,4 +286,22 @@ def reclassify(conn, min_for=None, progress=None, chunk=2000):
             conn.executemany("UPDATE listings SET category=?, category_rule=?, state=?, state_at=? WHERE id=?",
                              updates[start:start + chunk])
         say(f"  zapisano {min(start + chunk, len(updates))}/{len(updates)}")
+    if pending:
+        with conn:
+            conn.executemany("UPDATE listings SET category_check='pending' WHERE id=?", pending)
+        say(f"Do sprawdzenia zdjęcia przez AI (RAM + inna kategoria w tytule): {len(pending)}")
     return changes
+
+
+def state_for(category, old_state, price, min_for=None):
+    """Stan oferty po zmianie kategorii (reclassify / AI). sold / deleted / closed zostają."""
+    from .db import REVIVABLE
+
+    if old_state not in REVIVABLE:
+        return old_state
+    if category == "ignored":
+        return "ignored"
+    if category == "unknown":
+        return "unclassified"
+    low = min_for(category) if min_for else 0
+    return "below_min" if low and (price or 0) < low else "active"

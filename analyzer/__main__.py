@@ -7,6 +7,7 @@
   details [--limit N]                     szczegóły ofert (opis, atrybuty, „Dodane”) raz na ofertę
   resolve [--limit N]                     zniknięte z katalogu -> sold / deleted / unlisted (1 zapytanie/ofertę)
   classify-report / reclassify            klasyfikacja ofert z kategorii mieszanych (bez sieci)
+  classify-ai [--limit N]                 RAM + inna kategoria w tytule -> AI ocenia zdjęcie główne (bez proxy)
   diag                                    zmiany cen i braki pokrycia w ostatnim przejściu (bez sieci)
   status                                  podsumowanie bazy (oferty, stany, partycje, przejścia, transfer)
 """
@@ -72,6 +73,7 @@ async def cmd_watch(cfg, catalogs, resolve_limit, with_details=True):
             crawler = Crawler(cfg, session, conn)
             for catalog_id in catalogs:
                 await crawler.run(catalog_id)
+            await run_ai_classify(cfg, conn)
             await resolve(cfg, session, conn, resolve_limit)
             for line in status_lines(conn):
                 log.info("[STATUS] %s", line)
@@ -90,6 +92,31 @@ async def cmd_watch(cfg, catalogs, resolve_limit, with_details=True):
                  max(wait, 0) / 3600)
         if wait > 0:
             await asyncio.sleep(wait)
+
+
+async def run_ai_classify(cfg, conn, limit=None, retry_failed=False):
+    """Kategoria ze zdjęcia (AI) dla ofert „RAM + inna kategoria w tytule”. Błąd AI nie przerywa cyklu watch."""
+    if not cfg.ai_classify:
+        return None
+    from .ai_classify import classify_photos
+    try:
+        return await classify_photos(cfg, conn, limit=limit, retry_failed=retry_failed)
+    except Exception:
+        log.exception("[AI] Sprawdzanie zdjęć przerwane błędem - kategorie z reguł zostają, ponowię w kolejnym cyklu.")
+        return None
+
+
+async def cmd_classify_ai(cfg, limit, retry_failed):
+    conn = db.connect(cfg.db_path)
+    try:
+        stats = await run_ai_classify(cfg, conn, limit, retry_failed)
+        if stats is None:
+            print("Wyłączone (ANALYZER_AI_CLASSIFY=false) albo błąd - patrz log.")
+        left = conn.execute("SELECT category_check, COUNT(*) FROM listings WHERE category_check IS NOT NULL "
+                            "GROUP BY category_check").fetchall()
+        print("Stan sprawdzania zdjęć: " + (", ".join(f"{r[0]} {r[1]}" for r in left) or "nic do sprawdzenia"))
+    finally:
+        conn.close()
 
 
 async def cmd_details(cfg, limit):
@@ -204,6 +231,9 @@ def main(argv=None):
     sub.add_parser("diag", help="diagnostyka bazy (zmiany cen, braki pokrycia) - bez sieci")
     sub.add_parser("classify-report", help="klasyfikacja ofert z kategorii mieszanych - bez sieci")
     sub.add_parser("reclassify", help="ponowna klasyfikacja zapisanych ofert po poprawce reguł - bez sieci")
+    p_ai = sub.add_parser("classify-ai", help="kategoria ze zdjęcia głównego (AI) dla ofert 'RAM + coś innego' w tytule")
+    p_ai.add_argument("--limit", type=int, default=None, help="najwyżej tyle ofert (domyślnie ANALYZER_AI_CLASSIFY_LIMIT)")
+    p_ai.add_argument("--retry-failed", action="store_true", help="ponów też oferty z błędem AI")
     args = parser.parse_args(argv)
 
     cfg = AnalyzerConfig()
@@ -212,6 +242,8 @@ def main(argv=None):
         asyncio.run(cmd_crawl(cfg, args.catalog or list(cfg.catalogs)))
     elif args.command == "watch":
         asyncio.run(cmd_watch(cfg, args.catalog or list(cfg.catalogs), args.resolve_limit, not args.no_details))
+    elif args.command == "classify-ai":
+        asyncio.run(cmd_classify_ai(cfg, args.limit, args.retry_failed))
     elif args.command == "details":
         asyncio.run(cmd_details(cfg, args.limit))
     elif args.command == "resolve":

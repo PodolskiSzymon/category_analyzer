@@ -16,7 +16,7 @@ from sniper.session import RateLimited, SessionExpired
 
 from . import db
 from .catalog import fetch_page
-from .classify import classify_item
+from .classify import classify_item, needs_photo_check
 from .config import catalog_label
 from .diff import finish_snapshot
 from .partition import Range, can_split, initial_ranges, needs_split, split, to_grosze, to_zl
@@ -149,6 +149,10 @@ class Crawler:
         with self.conn:
             for item in items:
                 item.category, item.category_src, item.category_rule = classify_item(item, item.catalog_id)
+                if item.category_src == "rule":
+                    label = " ".join(x for x in (item.brand, item.model) if x)
+                    if needs_photo_check(item.title, label):
+                        item.category_check = "pending"
                 counts[db.upsert_item(self.conn, item, run_id, now, min_for)] += 1
         self._bump(run_id, new_ids=counts["new"], changed=counts["changed"], seen=len(items))
 

@@ -59,6 +59,7 @@ class CatalogItem:
     category: str = None
     category_src: str = None
     category_rule: str = None
+    category_check: str = None     # pending = kategorię rozstrzygnie AI ze zdjęcia (classify.needs_photo_check)
     raw: dict = field(default_factory=dict, repr=False)
 
     @property
