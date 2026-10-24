@@ -214,6 +214,30 @@ async def cmd_check(cfg, items):
             conn.close()
 
 
+async def cmd_html_dump(cfg, items):
+    """Zapisuje fragment strony, który program pobiera (do baneru wysyłki - bez nazwy sprzedawcy) do pliku + wynik
+    parsera - do sprawdzenia, czemu parser czegoś nie znalazł."""
+    import json as _json
+
+    from .check import parse_id
+    from .html_details import fetch_sidebar_html, parse_sidebar_html
+
+    session = build_session()
+    try:
+        for text in items:
+            item_id = parse_id(text)
+            status, html = await fetch_sidebar_html(session, item_id)
+            path = Path(cfg.db_path).parent / f"html_dump_{item_id}.html"
+            path.write_text(html, encoding="utf-8")
+            parsed = parse_sidebar_html(html) if html else None
+            print(f"{item_id}: HTTP {status}, pobrano {len(html.encode()) / 1000:.0f} KB (po rozpakowaniu), "
+                  f"panel boczny: {'jest' if '<aside id="sidebar"' in html else 'BRAK'} -> {path}")
+            print("  parser: " + _json.dumps(parsed, ensure_ascii=False)[:600])
+        log.info("[TRANSFER] %s", session.traffic.window_report()[0])
+    finally:
+        await session.close()
+
+
 async def cmd_html_details(cfg, states, limit, delay):
     from . import notify
     from .html_details import fetch_html_details
@@ -394,6 +418,8 @@ def main(argv=None):
     p_html.add_argument("--states", default="sold", help="stany ofert, po przecinku (domyślnie sold)")
     p_html.add_argument("--limit", type=int, default=None)
     p_html.add_argument("--delay", default="0.6-1.5", help="odstęp między ofertami w s (domyślnie 0.6-1.5)")
+    p_html.add_argument("--dump", nargs="+", metavar="LINK_LUB_ID",
+                        help="tylko zapisz pobrany fragment strony tych ofert do data/html_dump_<ID>.html (diagnoza)")
     p_extract = sub.add_parser("extract", help="parametry ofert regułami (CPU, GPU, RAM, dysk, model, bateria, stan) - "
                                                "bez sieci")
     p_extract.add_argument("--again", action="store_true", help="wszystkie oferty od nowa")
@@ -459,7 +485,10 @@ def main(argv=None):
     elif args.command == "html-details":
         from .config import parse_range
         states = tuple(x.strip() for x in args.states.split(",") if x.strip())
-        asyncio.run(cmd_html_details(cfg, states, args.limit, parse_range(args.delay, (0.6, 1.5))))
+        if args.dump:
+            asyncio.run(cmd_html_dump(cfg, args.dump))
+        else:
+            asyncio.run(cmd_html_details(cfg, states, args.limit, parse_range(args.delay, (0.6, 1.5))))
     elif args.command in ("extract", "extract-report"):
         from . import extract
         print(f"Otwieram bazę {cfg.db_path} ...", flush=True)
