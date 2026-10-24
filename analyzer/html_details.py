@@ -247,12 +247,12 @@ def store_html_details(conn, row, parsed, fetched_at):
                                                  "title": parsed["title"]}, fetched_at)
 
 
-def candidates(conn, states=("sold",), limit=None):
+def candidates(conn, states=("sold",), limit=None, random_order=False):
     marks = ",".join("?" * len(states))
     # + oferty z pustymi szczegółami ze strony (pierwsza wersja czytała szkielet panelu - 2026-10-24)
     sql = (f"SELECT * FROM listings WHERE (details_at IS NULL OR id IN (SELECT listing_id FROM details "
            f"WHERE source='html' AND description IS NULL)) AND state IN ({marks}) "
-           "AND category NOT IN ('ignored', 'unknown') ORDER BY last_seen DESC")
+           "AND category NOT IN ('ignored', 'unknown') ORDER BY " + ("RANDOM()" if random_order else "last_seen DESC"))
     params = list(states)
     if limit:
         sql += " LIMIT ?"
@@ -260,11 +260,12 @@ def candidates(conn, states=("sold",), limit=None):
     return conn.execute(sql, params).fetchall()
 
 
-async def fetch_html_details(cfg, session, conn, states=("sold",), limit=None, sleep=asyncio.sleep, progress=None):
+async def fetch_html_details(cfg, session, conn, states=("sold",), limit=None, sleep=asyncio.sleep, progress=None,
+                             random_order=False):
     """Pobiera szczegóły ze strony HTML dla ofert bez szczegółów w podanych stanach. Zwraca {wynik: liczba}."""
     import time
 
-    rows = candidates(conn, states, limit)
+    rows = candidates(conn, states, limit, random_order)
     log.info("[HTML] Ofert bez szczegółów (stany: %s): %d.", ", ".join(states), len(rows))
     counts, started = {}, time.monotonic()
     state = {"total": len(rows), "counts": counts, "n": 0, "eta": None}
@@ -295,10 +296,16 @@ async def fetch_html_details(cfg, session, conn, states=("sold",), limit=None, s
             key = "zablokowana (strona 404)"
         elif parsed is None:
             key = f"brak strony (HTTP {status})"
+            if row["state"] == "deleted" and status == 404:
+                key = "potwierdzona usunięta (strona 404)"
         else:
             with conn:
                 store_html_details(conn, row, parsed, db.utcnow())
             key = "ok" + (" (bez napisu Sprzedane!)" if parsed["sold"] is False and row["state"] == "sold" else "")
+            if row["state"] == "deleted":
+                key = "STRONA ISTNIEJE mimo 'deleted'"
+                log.info("[HTML] %s - 'deleted', a strona istnieje: https://www.vinted.pl/items/%s  %s",
+                         row["id"], row["id"], (row["title"] or "")[:50])
         counts[key] = counts.get(key, 0) + 1
         state.update(n=n + 1, eta=(time.monotonic() - started) / (n + 1) * (len(rows) - n - 1))
         if progress:

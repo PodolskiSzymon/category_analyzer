@@ -238,7 +238,7 @@ async def cmd_html_dump(cfg, items):
         await session.close()
 
 
-async def cmd_html_details(cfg, states, limit, delay):
+async def cmd_html_details(cfg, states, limit, delay, random_order=False):
     from . import notify
     from .html_details import fetch_html_details
     from .progress import ConsoleBar
@@ -251,7 +251,7 @@ async def cmd_html_details(cfg, states, limit, delay):
     conn = db.connect(cfg.db_path)
     session = build_session()
     try:
-        counts = await fetch_html_details(cfg, session, conn, states, limit, progress=bar)
+        counts = await fetch_html_details(cfg, session, conn, states, limit, progress=bar, random_order=random_order)
         bar.finish()
         transfer = session.traffic.window_report()[0]
         log.info("[TRANSFER] %s", transfer)
@@ -418,6 +418,8 @@ def main(argv=None):
     p_html.add_argument("--states", default="sold", help="stany ofert, po przecinku (domyślnie sold)")
     p_html.add_argument("--limit", type=int, default=None)
     p_html.add_argument("--delay", default="0.6-1.5", help="odstęp między ofertami w s (domyślnie 0.6-1.5)")
+    p_html.add_argument("--random", action="store_true", help="losowa kolejność (próbka, np. --states deleted "
+                                                              "--limit 200 do sprawdzenia, czy 'deleted' są usunięte)")
     p_html.add_argument("--dump", nargs="+", metavar="LINK_LUB_ID",
                         help="tylko zapisz pobrany fragment strony tych ofert do data/html_dump_<ID>.html (diagnoza)")
     p_extract = sub.add_parser("extract", help="parametry ofert regułami (CPU, GPU, RAM, dysk, model, bateria, stan) - "
@@ -488,7 +490,7 @@ def main(argv=None):
         if args.dump:
             asyncio.run(cmd_html_dump(cfg, args.dump))
         else:
-            asyncio.run(cmd_html_details(cfg, states, args.limit, parse_range(args.delay, (0.6, 1.5))))
+            asyncio.run(cmd_html_details(cfg, states, args.limit, parse_range(args.delay, (0.6, 1.5)), args.random))
     elif args.command in ("extract", "extract-report"):
         from . import extract
         print(f"Otwieram bazę {cfg.db_path} ...", flush=True)
