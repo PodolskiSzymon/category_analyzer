@@ -913,3 +913,19 @@ def test_sample_export_redacts_contacts(tmp_path):
     assert counts == {"laptop": 1} and row["attributes"] == {"status": "Dobry"}
     assert "kowalski" not in row["description"] and "123 456" not in row["description"]
     assert "allegro" not in row["description"] and "i5-8350U 16GB" in row["description"]
+
+
+def test_resolve_report_on_real_responses(tmp_path):
+    from analyzer.resolve_diag import report
+    conn = db.connect(":memory:")
+    for i, (state, status, body) in enumerate([("sold", 200, SNIPER_FIXTURES["sidebar_sold"]),
+                                               ("unlisted", 200, SNIPER_FIXTURES["sidebar_active"]),
+                                               ("deleted", 404, DELETED_BODY)], start=1):
+        conn.execute("INSERT INTO listings (id, catalog_id, title, first_seen, last_seen, state, state_at, category) "
+                     "VALUES (?, 3580, 't', 'x', 'x', ?, 'x', 'laptop')", (i, state))
+        db.put_raw(conn, i, "resolve", {"_status": status, "body": body})
+    lines = report(conn, tmp_path)
+    text = "\n".join(lines)
+    assert '"st.item_closing_action": "sold"' in text and '"http": 404' in text
+    sample = next(tmp_path.glob("resolve_sample_*.jsonl")).read_text(encoding="utf-8")
+    assert "zuziakarol" not in sample and len(sample.splitlines()) == 3      # bez danych sprzedawcy

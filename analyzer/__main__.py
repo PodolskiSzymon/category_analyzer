@@ -8,6 +8,7 @@
   resolve [--limit N]                     zniknięte z katalogu -> sold / deleted / unlisted (1 zapytanie/ofertę)
   classify-report / reclassify            klasyfikacja ofert z kategorii mieszanych (bez sieci)
   classify-ai [--limit N]                 RAM + inna kategoria w tytule -> AI ocenia zdjęcie główne (bez proxy)
+  resolve-report                          dlaczego 0 sprzedanych: zapisane odpowiedzi resolvera + próbka do wysłania
   sample [--per-category N]               próbka ofert z opisami (bez danych sprzedawcy) -> data/sample_*.jsonl
   diag                                    zmiany cen i braki pokrycia w ostatnim przejściu (bez sieci)
   status                                  podsumowanie bazy (oferty, stany, partycje, przejścia, transfer)
@@ -252,6 +253,7 @@ def main(argv=None):
     p_show.add_argument("folder", nargs="?", default=None, help="domyślnie najnowszy data/probe/*")
     sub.add_parser("status", help="podsumowanie bazy")
     sub.add_parser("diag", help="diagnostyka bazy (zmiany cen, braki pokrycia) - bez sieci")
+    sub.add_parser("resolve-report", help="diagnostyka rozpoznawania sprzedaży (zapisane odpowiedzi) - bez sieci")
     p_sample = sub.add_parser("sample", help="próbka ofert z opisami do projektu ekstrakcji -> data/sample_*.jsonl")
     p_sample.add_argument("--per-category", type=int, default=150)
     sub.add_parser("classify-report", help="klasyfikacja ofert z kategorii mieszanych - bez sieci")
@@ -294,6 +296,12 @@ def main(argv=None):
             print("Zmiany kategorii: " + (", ".join(f"{a} → {b}: {n}" for (a, b), n in sorted(changes.items()))
                                           or "brak"))
         print("\n".join(classify.report(conn)))
+        conn.close()
+    elif args.command == "resolve-report":
+        from .resolve_diag import report
+        print(f"Otwieram bazę {cfg.db_path} ...", flush=True)
+        conn = db.connect(cfg.db_path)
+        print("\n".join(report(conn, Path(cfg.db_path).parent, progress=lambda t: print(t, flush=True))))
         conn.close()
     elif args.command == "sample":
         from .sample import export
