@@ -214,6 +214,12 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   strona usuniętej (pewnie 404 „Page not found”), zarezerwowanej / ukrytej (inny `theme`/`title`?), czy Datadome
   wpuszcza nasze zapytania HTML przez proxy, czy klasy CSS (`ymptpG_…`) są stałe (hash – mogą się zmieniać;
   `web_ui__Cell__success` i `aside id="sidebar"` wyglądają na stałe).
+* **Obserwacja użytkownika (2026-10-24, przeglądarka)**: `www.vinted.pl/api/v2/items/{id}/details/sidebar` zwraca
+  dane dla **aktywnych** (także nowych) ofert, ale **NIE dla sprzedanych** (404/104, np. myszka 9011596531).
+  Natomiast `www.vinted.pl/api/v2/items/{id}/services` odpowiada **zarówno dla aktywnych, jak i sprzedanych**
+  (np. 9011596531). ⚠ Zawartość odpowiedzi `/services` jeszcze nieznana – czy rozróżnia sprzedaną / aktywną / usuniętą
+  (i ile waży) – czeka na Response z F12 dla: sprzedanej, aktywnej i naprawdę usuniętej oferty. Jeśli rozróżnia,
+  to jest tańsze źródło statusu niż strona HTML (~30 KB przy przerwanym pobieraniu).
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
