@@ -1254,6 +1254,8 @@ def test_html_details_flow_stops_early_and_stores():
 
     def handler(request):
         requested.append(request)
+        if request.url.path == f"/items/{sold_id}":             # jak Vinted: przekierowanie na adres z nazwą
+            return httpx.Response(301, headers={"location": f"/items/{sold_id}-logitech-mouse"})
         if str(sold_id) in request.url.path:
             return httpx.Response(200, html=page)
         return httpx.Response(404, html="<html>Page not found</html>")
@@ -1266,7 +1268,9 @@ def test_html_details_flow_stops_early_and_stores():
             await session.client.aclose()
 
     counts = asyncio.run(go())
-    assert counts == {"ok": 1, "brak strony (HTTP 404)": 1}
+    assert counts == {"ok": 1, "zablokowana (strona 404)": 1}
+    gone = conn.execute("SELECT state, sold_price FROM listings WHERE id=?", (gone_id,)).fetchone()
+    assert tuple(gone) == ("blocked", None)                     # „sprzedana” bez strony = zdjęta przez Vinted
     d = conn.execute("SELECT * FROM details WHERE listing_id=?", (sold_id,)).fetchone()
     assert d["source"] == "html" and d["upload_age"] == "4 mies." and "Tested and working" in d["description"]
     row = conn.execute("SELECT * FROM listings WHERE id=?", (sold_id,)).fetchone()

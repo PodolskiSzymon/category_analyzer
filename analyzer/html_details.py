@@ -10,6 +10,10 @@ Struktura sprawdzona na stronach zapisanych przez użytkownika (2026-10-24: sprz
 ⚠ Nagłówki zapytania o stronę jak przy zwykłym wejściu przeglądarką (nawigacja) - do potwierdzenia na żywo
 (`html-details --limit 5`).
 
+Sprzedana według /services (sidebar 404, /services 200), ale strona oferty 404 → stan `blocked` (zdjęta przez Vinted,
+np. zablokowane konto oszusta - pierwsze 5 sprawdzonych u użytkownika 2026-10-24: 3 takie, powtarzane „iPhone 16 Pro”
+za 519 zł) - nie liczy się do sprzedaży.
+
 `python -m analyzer html-details [--states sold] [--limit N]`
 """
 import asyncio
@@ -158,7 +162,7 @@ async def fetch_sidebar_html(session, item_id):
         request = session.client.build_request("GET", url, headers=PAGE_HEADERS)
         for name in DROP_HEADERS:
             request.headers.pop(name, None)
-        response = await session.client.send(request, stream=True)
+        response = await session.client.send(request, stream=True, follow_redirects=True)
         try:
             if response.status_code in (401, 403) and attempt == 0:
                 await response.aclose()
@@ -247,7 +251,15 @@ async def fetch_html_details(cfg, session, conn, states=("sold",), limit=None, s
             counts["błąd"] = counts.get("błąd", 0) + 1
             continue
         parsed = parse_sidebar_html(html) if status == 200 else None
-        if parsed is None:
+        if parsed is None and status == 404 and row["state"] == "sold":
+            # /services odpowiadał (stąd „sold”), ale strony nie ma: oferta zdjęta przez Vinted (np. konto
+            # oszusta zablokowane) - to NIE jest sprzedaż.
+            with conn:
+                conn.execute("UPDATE listings SET state='blocked', state_at=?, sold_price=NULL, days_to_sell=NULL "
+                             "WHERE id=?", (db.utcnow(), row["id"]))
+                db.put_raw(conn, row["id"], "html_sidebar", {"http": status, "blocked": True}, db.utcnow())
+            key = "zablokowana (strona 404)"
+        elif parsed is None:
             key = f"brak strony (HTTP {status})"
         else:
             with conn:

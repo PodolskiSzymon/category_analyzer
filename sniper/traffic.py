@@ -20,7 +20,11 @@ def _headers_size(headers):
 
 def request_bytes(request):
     line = len(request.method) + len(request.url.raw_path) + 12   # "GET <ścieżka> HTTP/1.1\r\n"
-    return line + _headers_size(request.headers) + 2 + len(request.content or b"")
+    try:
+        body = len(request.content or b"")
+    except Exception:   # httpx.RequestNotRead: zapytanie po przekierowaniu w trybie stream (GET - bez treści)
+        body = 0
+    return line + _headers_size(request.headers) + 2 + body
 
 
 def response_bytes(response):

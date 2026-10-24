@@ -257,6 +257,14 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   ofert klucz konfiguracji: laptopy 96%, telefony 94%, RAM 97%, dyski 88%, GPU 79%, tablety 75%, konsole 100%
   (platforma). `python -m analyzer extract [--again]`, `extract-report` (pokrycie pól + konfiguracje z medianą ceny
   i ceny sprzedaży); w `watch` przyrostowo po resolve. AI dla braków – później (po pierwszym raporcie).
+* **Wynik `recheck` u użytkownika (2026-10-24)**: 13 841 ofert w 5,1 h, 78,6 MB (5,6 KB/ofertę): deleted 13 300
+  (96%), sold 454 (3,3%), unlisted 53, active 23, hidden 2, błąd 9. Hipotezy: (1) dużo „usunięć” to usuwanie
+  i ponowne wystawianie (podbicie na górę „najnowsze”) – do wykrycia przy raportach (tytuł/cena/zdjęcie/hash
+  sprzedawcy); (2) część „sold” to oszustwa zdjęte przez Vinted (powtarzane „iPhone 16 Pro 512 GB” za 519 zł,
+  „iPhone 15 Pro” za 900 zł) – `/services` 200 + sidebar 404, ale **strona oferty 404** (`html-details --limit 5`:
+  3 z 5) → nowy stan **`blocked`** (html_details; nie liczy się do sprzedaży; w `REVIVABLE`/`GONE_STATES`).
+  Poprawka: `traffic.request_bytes` nie wywraca się na zapytaniu po przekierowaniu (`/items/ID` → `/items/ID-slug`,
+  httpx `RequestNotRead`).
 * **Następne**: po `recheck` u użytkownika: `html-details` (opisy sprzedanych), `extract`, pierwszy raport; potem AI
   dla braków ekstrakcji i `report` (etap 4).
 

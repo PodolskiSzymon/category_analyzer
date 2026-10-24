@@ -279,8 +279,8 @@ def real_change(last, obs, seller_currency=None):
 # gdy znów pojawi się w katalogu. Od 2026-10-24 także deleted / sold / closed: obecność w katalogu jest pewniejsza niż
 # odpowiedź sprawdzenia (aktywny MacBook 10292094832 był 12 dni „deleted”, a cały czas w katalogu).
 REVIVABLE = {"active", "reserved", "gone_pending", "hidden", "unlisted", "below_min", "ignored", "unclassified",
-             "deleted", "sold", "closed"}
-GONE_STATES = ("deleted", "sold", "closed")
+             "deleted", "sold", "closed", "blocked"}
+GONE_STATES = ("deleted", "sold", "closed", "blocked")
 KEEP_CATEGORY_SRC = ("ai", "manual")   # decyzji AI / ręcznych nie nadpisują reguły przy kolejnych przejściach
 
 
