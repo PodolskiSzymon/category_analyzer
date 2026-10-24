@@ -201,6 +201,19 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
     zniknięć”), (2) 404/104 → stan `gone_404` (nie wiadomo: usunięta albo sprzedana) z ponownym sprawdzeniem,
     (3) nowe źródło statusu sprzedaży z F12, (4) jednorazowe ponowne sprawdzenie wszystkich `deleted` nowym źródłem
     (dane – ceny, daty, opisy – są w bazie; sprzedane oferty Vinted pokazuje miesiącami).
+* **Źródło statusu sprzedaży – strona HTML oferty (analiza 2026-10-24, pliki od użytkownika, incognito)**:
+  `api.vinted.pl/item-details/more-items/{id}` = tylko „Podobne rzeczy” / „Przedmioty użytkownika” (BEZ statusu –
+  odpada). Strona `www.vinted.pl/items/{id}` (Next.js, ~1,9 MB, gzip ~365 KB) zawiera osadzony obiekt `type: sidebar`
+  z NOWYM zestawem pluginów: sprzedana → plugin **`buyer_item_status`** `{"theme": "SUCCESS", "title": "Sprzedane"}`,
+  `can_buy: false`, brak `buy`/`make_offer`/`ask_seller`; aktywna → brak `buyer_item_status`, `can_buy: true`, są
+  `buy`, `make_offer`, `ask_seller`. Starego pluginu `item_status` (`item_closing_action`) w stronie nie ma wcale.
+  Osadzony JSON jest daleko (~78–97% pliku), ALE wyrenderowany HTML ma status wcześnie: pierwsza karta w
+  `<aside id="sidebar">` (~290–315 KB, gzip ~30 KB) – sprzedana: `web_ui__Cell__success` → „Sprzedane”, aktywna: od
+  razu `ymptpG_box--item-details`, dalej `data-testid="item-buy-button"` (~325 KB). Plan: pobierać stronę
+  strumieniowo i przerwać po karcie sidebara → ~30–35 KB transferu na ofertę (zamiast ~365 KB). ⚠ Niesprawdzone:
+  strona usuniętej (pewnie 404 „Page not found”), zarezerwowanej / ukrytej (inny `theme`/`title`?), czy Datadome
+  wpuszcza nasze zapytania HTML przez proxy, czy klasy CSS (`ymptpG_…`) są stałe (hash – mogą się zmieniać;
+  `web_ui__Cell__success` i `aside id="sidebar"` wyglądają na stałe).
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
