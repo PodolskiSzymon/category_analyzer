@@ -141,7 +141,7 @@ def recheck_links(conn, since, show=("sold", "hidden"), per_state=50):
     return lines
 
 
-async def cmd_recheck(cfg, states, limit, again, human=True, delay=(1.0, 2.5), show=("sold", "hidden")):
+async def cmd_recheck(cfg, states, limit, again, human=True, delay=(0.6, 1.5), show=("sold", "hidden")):
     from .pacing import HumanPacer
     from .progress import ConsoleBar
     from .resolver import recheck
@@ -152,7 +152,8 @@ async def cmd_recheck(cfg, states, limit, again, human=True, delay=(1.0, 2.5), s
         handler.addFilter(bar)          # wpisy logu nie rozjeżdżają paska
     pacer = HumanPacer(base=delay) if human else None
     log.info("[RECHECK] Tempo: odstęp losowo %g-%g s%s. Cały ruch do Vinted przez proxy (SNIPER_PROXY_*).", *delay,
-             ", mniej więcej co pół godziny przerwa 10-120 s" if human else " (bez przerw co pół godziny)")
+             ", mniej więcej co pół godziny przerwa 10-120 s, po 12 h pracy odpoczynek 8 h" if human
+             else " (bez przerw)")
     cfg.page_delay = delay
     conn = db.connect(cfg.db_path)
     session = build_session()
@@ -326,14 +327,14 @@ def main(argv=None):
                            help="stany do sprawdzenia, po przecinku (domyślnie deleted; np. deleted,unlisted,hidden)")
     p_recheck.add_argument("--limit", type=int, default=None)
     p_recheck.add_argument("--again", action="store_true", help="także oferty już sprawdzone przez /services")
-    p_recheck.add_argument("--delay", default="1-2.5", help="odstęp między ofertami w s, losowo z zakresu "
-                                                           "(domyślnie 1-2.5)")
+    p_recheck.add_argument("--delay", default="0.6-1.5", help="odstęp między ofertami w s, losowo z zakresu "
+                                                             "(domyślnie 0.6-1.5)")
     p_recheck.add_argument("--show", default="sold,hidden",
                            help="po zakończeniu wypisz linki ofert z tymi wynikami (domyślnie sold,hidden; np. "
                                 "sold,hidden,deleted,active)")
     p_recheck.add_argument("--links-only", action="store_true",
                            help="bez sprawdzania - tylko linki z dotychczasowych wyników recheck (--show)")
-    p_recheck.add_argument("--no-pauses", action="store_true", help="bez przerwy co ~pół godziny (tylko odstępy)")
+    p_recheck.add_argument("--no-pauses", action="store_true", help="bez przerw co ~pół godziny i bez 8 h odpoczynku (tylko odstępy)")
     p_check = sub.add_parser("check", help="czy oferta jest sprzedana: link(i) albo ID - jedno zapytanie na ofertę")
     p_check.add_argument("items", nargs="+", help="link https://www.vinted.pl/items/... albo samo ID")
     sub.add_parser("resolve-report", help="diagnostyka rozpoznawania sprzedaży (zapisane odpowiedzi) - bez sieci")
@@ -383,7 +384,7 @@ def main(argv=None):
     elif args.command == "recheck":
         states = tuple(x.strip() for x in args.states.split(",") if x.strip())
         from .config import parse_range
-        delay = parse_range(args.delay, (1.0, 2.5))
+        delay = parse_range(args.delay, (0.6, 1.5))
         show = tuple(x.strip() for x in args.show.split(",") if x.strip())
         if args.links_only:
             conn = db.connect(cfg.db_path)

@@ -1081,7 +1081,7 @@ def test_human_pacer_has_breaks_and_uneven_gaps():
     import random
     from analyzer.pacing import HumanPacer
     now = [0.0]
-    pacer = HumanPacer(rng=random.Random(1), clock=lambda: now[0])          # domyślnie 1-2,5 s, przerwa 10-120 s
+    pacer = HumanPacer(rng=random.Random(1), work_hours=0, clock=lambda: now[0])   # 0,6-1,5 s, przerwa 10-120 s
     delays = []
     while now[0] < 5 * 3600:                     # 5 godzin pracy
         delay, label = pacer.next()
@@ -1091,8 +1091,23 @@ def test_human_pacer_has_breaks_and_uneven_gaps():
     normal = [d for d, label in delays if label is None]
     assert 8 <= len(breaks) <= 12                # ~raz na pół godziny
     assert all(10 <= d <= 120 for d in breaks)
-    assert all(1 <= d <= 2.5 for d in normal) and len({round(d, 2) for d in normal}) > 100   # nierówne odstępy
-    assert 1.6 < sum(normal) / len(normal) < 1.9
+    assert all(0.6 <= d <= 1.5 for d in normal) and len({round(d, 2) for d in normal}) > 50   # nierówne odstępy
+    assert 0.95 < sum(normal) / len(normal) < 1.15
+
+
+def test_human_pacer_rests_8h_after_12h():
+    import random
+    from analyzer.pacing import HumanPacer
+    now = [0.0]
+    pacer = HumanPacer(rng=random.Random(2), clock=lambda: now[0])
+    rests = []
+    while now[0] < 45 * 3600:
+        delay, label = pacer.next()
+        if label and label.startswith("odpoczynek"):
+            rests.append((now[0], delay))
+        now[0] += delay + 1.0
+    assert [round(start / 3600) for start, _ in rests] == [12, 32]       # 12 h pracy, 8 h przerwy, 12 h pracy...
+    assert all(d == 8 * 3600 for _, d in rests)
 
 
 def test_recheck_progress_bar_and_pauses():
@@ -1116,7 +1131,7 @@ def test_recheck_progress_bar_and_pauses():
         session = await _mock_session(_vinted(routes))
         try:
             ticks = iter([0.0] + [10.0 ** 6] * 100)        # start, potem „pół godziny później” - przerwa
-            pacer = HumanPacer(base=(2.0, 4.0), break_len=(40.0, 40.0), clock=lambda: next(ticks))
+            pacer = HumanPacer(base=(2.0, 4.0), break_len=(40.0, 40.0), work_hours=0, clock=lambda: next(ticks))
             return await recheck(make_cfg(), session, conn, sleep=fake_sleep, pacer=pacer,
                                  progress=ConsoleBar(stream=out, width=150))
         finally:
