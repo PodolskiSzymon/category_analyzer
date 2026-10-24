@@ -123,18 +123,32 @@ async def cmd_classify_ai(cfg, limit, retry_failed):
         conn.close()
 
 
-async def cmd_recheck(cfg, states, limit, again):
+async def cmd_recheck(cfg, states, limit, again, human=True):
+    from .pacing import HumanPacer
+    from .progress import ConsoleBar
     from .resolver import recheck
 
+    bar = ConsoleBar()
+    console = [h for h in logging.getLogger().handlers if type(h) is logging.StreamHandler]
+    for handler in console:
+        handler.addFilter(bar)          # wpisy logu nie rozjeżdżają paska
+    pacer = HumanPacer(base=cfg.page_delay) if human else None
+    if human:
+        log.info("[RECHECK] Tempo „ludzkie”: odstęp %g-%g s, co 25-60 ofert przerwa 0,5-2 min, co 300-600 ofert "
+                 "5-15 min (bez przerw: --no-pauses).", *cfg.page_delay)
     conn = db.connect(cfg.db_path)
     session = build_session()
     try:
-        await recheck(cfg, session, conn, states, limit, again)
+        await recheck(cfg, session, conn, states, limit, again, pacer=pacer, progress=bar)
+        bar.finish()
         log.info("[TRANSFER] %s", session.traffic.window_report()[0])
         for row in conn.execute("SELECT category, state, COUNT(*) AS n FROM listings WHERE services_at IS NOT NULL "
                                 "GROUP BY category, state ORDER BY category, n DESC"):
             log.info("[RECHECK] sprawdzone przez /services: %-8s %-10s %d", row["category"], row["state"], row["n"])
     finally:
+        bar.finish()
+        for handler in console:
+            handler.removeFilter(bar)
         await session.close()
         conn.close()
 
@@ -292,6 +306,7 @@ def main(argv=None):
     p_recheck.add_argument("--again", action="store_true", help="także oferty już sprawdzone przez /services")
     p_recheck.add_argument("--delay", default=None, help="przerwa między ofertami w s, np. 2-4 (domyślnie jak "
                                                          "ANALYZER_PAGE_DELAY_S, 2-6)")
+    p_recheck.add_argument("--no-pauses", action="store_true", help="bez dłuższych „ludzkich” przerw (tylko odstępy)")
     p_check = sub.add_parser("check", help="czy oferta jest sprzedana: link(i) albo ID - jedno zapytanie na ofertę")
     p_check.add_argument("items", nargs="+", help="link https://www.vinted.pl/items/... albo samo ID")
     sub.add_parser("resolve-report", help="diagnostyka rozpoznawania sprzedaży (zapisane odpowiedzi) - bez sieci")
@@ -343,7 +358,7 @@ def main(argv=None):
         if args.delay:
             from .config import parse_range
             cfg.page_delay = parse_range(args.delay, cfg.page_delay)
-        asyncio.run(cmd_recheck(cfg, states, args.limit, args.again))
+        asyncio.run(cmd_recheck(cfg, states, args.limit, args.again, human=not args.no_pauses))
     elif args.command == "check":
         asyncio.run(cmd_check(cfg, args.items))
     elif args.command == "resolve-report":

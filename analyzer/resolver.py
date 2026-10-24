@@ -206,15 +206,35 @@ def _below_min(cfg, row, res):
     return state, reason
 
 
-async def _run(cfg, session, conn, rows, tag, sleep=asyncio.sleep, verbose=True):
-    """Sprawdza oferty po kolei (resolve_item) i zapisuje wyniki. Zwraca {stan: liczba}."""
+async def _pause(seconds, label, sleep, progress, state):
+    """Przerwa; z paskiem postępu odliczana co sekundę (widać, że program żyje)."""
+    if progress is None or seconds < 3:
+        await sleep(seconds)
+        return
+    left = seconds
+    while left > 0:
+        progress(dict(state, stage="pause", label=label or "odstęp", left=left))
+        step = min(1.0, left)
+        await sleep(step)
+        left -= step
+
+
+async def _run(cfg, session, conn, rows, tag, sleep=asyncio.sleep, verbose=True, pacer=None, progress=None):
+    """Sprawdza oferty po kolei (resolve_item) i zapisuje wyniki. Zwraca {stan: liczba}.
+    pacer - HumanPacer („ludzkie” przerwy) zamiast cfg.pick_delay(); progress(dict) - pasek postępu (recheck)."""
     import time
 
     counts = {}
     started = time.monotonic()
+    total = len(rows)
+    state = {"total": total, "counts": counts, "n": 0, "eta": None}
     for n, row in enumerate(rows):
         if n:
-            await sleep(cfg.pick_delay())
+            delay, label = pacer.next() if pacer else (cfg.pick_delay(), None)
+            await _pause(delay, label, sleep, progress, state)
+        state.update(n=n, row=row)
+        if progress:
+            progress(dict(state, stage="check"))
         try:
             res = await resolve_item(session, row["id"])
         except RateLimited:
@@ -224,20 +244,23 @@ async def _run(cfg, session, conn, rows, tag, sleep=asyncio.sleep, verbose=True)
             log.warning("[%s] %s: błąd %r", tag, row["id"], exc)
             counts["błąd"] = counts.get("błąd", 0) + 1
             continue
-        state, reason = _below_min(cfg, row, res)
+        result, reason = _below_min(cfg, row, res)
         status_code, body = res.sidebar if res.sidebar else (None, None)
         with conn:
-            apply_result(conn, row, state, status_code, body, db.utcnow(), res.services)
-        if state == "unlisted" and row["missed_runs"] == 0:
-            state = "active"
-        key = state or "nieznany"
+            apply_result(conn, row, result, status_code, body, db.utcnow(), res.services)
+        if result == "unlisted" and row["missed_runs"] == 0:
+            result = "active"
+        key = result or "nieznany"
         counts[key] = counts.get(key, 0) + 1
+        per = (time.monotonic() - started) / (n + 1)
+        state.update(n=n + 1, eta=per * (total - n - 1))
+        if progress:
+            progress(dict(state, stage="done", key=key, reason=reason))
         if verbose:
             log.info("[%s] %s %s -> %s (%s)", tag, row["id"], (row["title"] or "")[:40], key, reason)
-        elif (n + 1) % 50 == 0 or n + 1 == len(rows):
-            per = (time.monotonic() - started) / (n + 1)
-            log.info("[%s] %d/%d (zostało ~%.1f h): %s", tag, n + 1, len(rows), per * (len(rows) - n - 1) / 3600,
-                     ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+        elif (n + 1) % 50 == 0 or n + 1 == total:
+            log.info("[%s] %d/%d (zostało ~%.1f h): %s", tag, n + 1, total, state["eta"] / 3600,
+                      ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
     log.info("[%s] Wynik: %s", tag, ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "nic do zrobienia")
     return counts
 
@@ -264,10 +287,11 @@ def recheck_candidates(conn, states=RECHECK_STATES, limit=None, again=False):
     return conn.execute(sql, params).fetchall()
 
 
-async def recheck(cfg, session, conn, states=RECHECK_STATES, limit=None, again=False, sleep=asyncio.sleep):
+async def recheck(cfg, session, conn, states=RECHECK_STATES, limit=None, again=False, sleep=asyncio.sleep,
+                  pacer=None, progress=None):
     """Jednorazowa naprawa (2026-10-24): oferty oznaczone dawną metodą (`deleted` = sprzedane + usunięte + aktywne)
     sprawdzane od nowa: /services → (sidebar) → deleted / sold / active / unlisted / hidden / reserved.
     Można przerwać i wznowić - pomija już sprawdzone (services_at)."""
     rows = recheck_candidates(conn, states, limit, again)
     log.info("[RECHECK] Do sprawdzenia: %d ofert (stany: %s).", len(rows), ", ".join(states))
-    return await _run(cfg, session, conn, rows, "RECHECK", sleep, verbose=False)
+    return await _run(cfg, session, conn, rows, "RECHECK", sleep, verbose=False, pacer=pacer, progress=progress)

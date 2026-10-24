@@ -1075,3 +1075,50 @@ def test_details_404_resolved_by_services():
     assert counts == {"sold": 1, "deleted": 1, "ok": 3}
     assert conn.execute("SELECT state FROM listings WHERE id=?", (ids[0],)).fetchone()[0] == "sold"
     assert conn.execute("SELECT state FROM listings WHERE id=?", (ids[1],)).fetchone()[0] == "deleted"
+
+
+def test_human_pacer_has_breaks_and_uneven_gaps():
+    import random
+    from analyzer.pacing import HumanPacer
+    pacer = HumanPacer(base=(2.0, 6.0), rng=random.Random(1))
+    delays = [pacer.next() for _ in range(1300)]
+    shorts = [d for d, label in delays if label == "krótka przerwa"]
+    longs = [d for d, label in delays if label == "dłuższa przerwa"]
+    normal = [d for d, label in delays if label is None]
+    assert 20 <= len(shorts) <= 60 and 2 <= len(longs) <= 5
+    assert all(30 <= d <= 120 for d in shorts) and all(300 <= d <= 900 for d in longs)
+    assert all(2 <= d <= 6 for d in normal) and len({round(d, 1) for d in normal}) > 30    # nierówne odstępy
+    assert 3.0 < sum(normal) / len(normal) < 4.0
+
+
+def test_recheck_progress_bar_and_pauses():
+    import io
+    from analyzer.pacing import HumanPacer
+    from analyzer.progress import ConsoleBar
+    from analyzer.resolver import recheck
+
+    market = FakeMarket(market_prices(200, seed=24))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    ids = sorted(market.items)[:6]
+    with conn:
+        conn.execute(f"UPDATE listings SET state='deleted' WHERE id IN ({','.join('?' * len(ids))})", ids)
+    routes = {(i, "services"): (404, SERVICES_DELETED) for i in ids}
+    out, slept = io.StringIO(), []
+
+    async def fake_sleep(s):
+        slept.append(s)
+
+    async def go():
+        session = await _mock_session(_vinted(routes))
+        try:
+            pacer = HumanPacer(base=(2.0, 4.0), short_every=(3, 3), short_pause=(40.0, 40.0))
+            return await recheck(make_cfg(), session, conn, sleep=fake_sleep, pacer=pacer,
+                                 progress=ConsoleBar(stream=out, width=150))
+        finally:
+            await session.client.aclose()
+
+    assert asyncio.run(go()) == {"deleted": 6}
+    text = out.getvalue()
+    assert "6/6 100.0%" in text and "-> deleted" in text and "krótka przerwa: 0:40" in text
+    assert "[####################]" in text and "sprawdzam" in text
+    assert sum(slept) >= 40          # przerwa odliczana co sekundę
