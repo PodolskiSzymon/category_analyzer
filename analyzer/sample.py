@@ -20,29 +20,38 @@ def redact(text):
     return _PHONE.sub("[telefon]", text)
 
 
-def export(conn, out_dir, per_category=150):
+def export(conn, out_dir, per_category=150, progress=None):
+    """Losowanie po samych ID (szybkie), dopiero potem odczyt opisów wylosowanych ofert."""
+    import random
+
+    say = progress or (lambda _text: None)
     path = Path(out_dir) / f"sample_{datetime.now():%Y%m%d_%H%M}.jsonl"
     counts = {}
-    categories = [r[0] for r in conn.execute(
-        "SELECT DISTINCT l.category FROM listings l JOIN details d ON d.listing_id = l.id "
-        "WHERE l.category NOT IN ('ignored', 'unknown') AND d.description IS NOT NULL")]
+    say("Szukam ofert z opisami...")
+    ids = {}
+    for r in conn.execute("SELECT l.id, l.category, l.state FROM listings l JOIN details d ON d.listing_id = l.id "
+                          "WHERE l.category NOT IN ('ignored', 'unknown') AND d.description IS NOT NULL"):
+        group = "active" if r["state"] == "active" else "gone"
+        ids.setdefault(r["category"], {"active": [], "gone": []})[group].append(r["id"])
+    half = max(1, per_category // 2)
     with path.open("w", encoding="utf-8") as f:
-        for category in categories:
-            half = max(1, per_category // 2)
-            rows = []
-            for states in (("sold", "deleted", "closed", "hidden", "reserved", "unlisted"), ("active",)):
-                marks = ",".join("?" * len(states))
-                rows += conn.execute(
-                    f"""SELECT l.id, l.category, l.catalog_id, l.title, l.brand, l.model, l.status_label, l.state,
-                               l.price_now, l.sold_price, l.days_to_sell, l.first_seen, l.last_seen,
-                               d.description, d.attributes_json, d.seller_currency, d.photo_count
-                        FROM listings l JOIN details d ON d.listing_id = l.id
-                        WHERE l.category = ? AND l.state IN ({marks}) AND d.description IS NOT NULL
-                        ORDER BY RANDOM() LIMIT ?""", (category, *states, half)).fetchall()
-            for r in rows:
+        for category, groups in sorted(ids.items()):
+            chosen = []
+            for group in ("gone", "active"):
+                pool = groups[group]
+                chosen += random.sample(pool, min(half, len(pool)))
+            say(f"  {category}: z opisem {len(groups['active'])} aktywnych, {len(groups['gone'])} zniknętych "
+                f"- wybieram {len(chosen)}")
+            for listing_id in chosen:
+                r = conn.execute(
+                    """SELECT l.id, l.category, l.catalog_id, l.title, l.brand, l.model, l.status_label, l.state,
+                              l.price_now, l.sold_price, l.days_to_sell, l.first_seen, l.last_seen,
+                              d.description, d.attributes_json, d.seller_currency, d.photo_count
+                       FROM listings l JOIN details d ON d.listing_id = l.id WHERE l.id = ?""",
+                    (listing_id,)).fetchone()
                 item = dict(r)
                 item["description"] = redact(item["description"])
                 item["attributes"] = json.loads(item.pop("attributes_json") or "{}")
                 f.write(json.dumps(item, ensure_ascii=False) + "\n")
-            counts[category] = len(rows)
+            counts[category] = len(chosen)
     return path, counts

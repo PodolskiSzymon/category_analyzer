@@ -156,20 +156,29 @@ async def cmd_probe(cfg, catalog_id, items):
         await session.close()
 
 
-def coverage_lines(conn, tolerance=1.0, tolerance_pct=1.5):
+def coverage_lines(conn, tolerance=1.0, tolerance_pct=1.5, progress=None):
     """Kontrola kompletności: dla każdej partycji ile ofert z bazy (bieżąca cena ± max(tolerance zł, tolerance_pct %))
     vs total_entries z Vinted. Tolerancja procentowa - filtr Vinted liczy oferty zagraniczne po swoim kursie
-    (diag 2026-10-12), więc ich cena w zł bywa poza przedziałem o ułamek procenta."""
+    (diag 2026-10-12), więc ich cena w zł bywa poza przedziałem o ułamek procenta.
+    Ceny jednej kategorii wczytywane raz i liczone bisekcją (wcześniej jedno zapytanie na partycję - minuty na
+    słabym komputerze przy tysiącu partycji)."""
+    from bisect import bisect_left, bisect_right
+
+    say = progress or (lambda _text: None)
     lines = []
     rows = conn.execute("SELECT * FROM partitions WHERE active=1 AND last_total IS NOT NULL ORDER BY catalog_id, "
                         "price_from").fetchall()
-    by_catalog = {}
+    by_catalog, prices = {}, {}
     for row in rows:
+        key = (row["catalog_id"], row["done_run_id"])
+        if key not in prices:
+            say(f"  kontrola pokrycia: {catalog_label(row['catalog_id'])}...")
+            prices[key] = sorted(r[0] for r in conn.execute(
+                "SELECT price_now FROM listings WHERE catalog_id=? AND last_run_id=? AND price_now IS NOT NULL", key))
         lo = row["price_from"] - max(tolerance, row["price_from"] * tolerance_pct / 100)
         hi = (row["price_to"] + max(tolerance, row["price_to"] * tolerance_pct / 100)
               if row["price_to"] is not None else 1e12)
-        have = conn.execute("SELECT COUNT(*) FROM listings WHERE catalog_id=? AND last_run_id=? AND "
-                            "price_now BETWEEN ? AND ?", (row["catalog_id"], row["done_run_id"], lo, hi)).fetchone()[0]
+        have = bisect_right(prices[key], hi) - bisect_left(prices[key], lo)
         stats = by_catalog.setdefault(row["catalog_id"], {"parts": 0, "short": 0, "missing": 0, "worst": []})
         stats["parts"] += 1
         if have < row["last_total"]:
@@ -186,11 +195,14 @@ def coverage_lines(conn, tolerance=1.0, tolerance_pct=1.5):
     return lines
 
 
-def status_lines(conn):
+def status_lines(conn, progress=None):
+    say = progress or (lambda _text: None)
     lines = []
+    say("  liczę oferty według kategorii i stanu...")
     for row in conn.execute("SELECT COALESCE(category, '?') AS category, state, COUNT(*) AS n FROM listings "
                             "GROUP BY category, state ORDER BY category, n DESC"):
         lines.append(f"przedmiot {row['category']:<8}: {row['state']:<13} {row['n']}")
+    say("  liczę pobrane szczegóły...")
     for row in conn.execute("SELECT COALESCE(category, '?') AS category, COUNT(*) AS n, SUM(details_at IS NOT NULL) AS d "
                             "FROM listings WHERE state IN ('active', 'reserved', 'unlisted') GROUP BY category"):
         lines.append(f"przedmiot {row['category']:<8}: szczegóły pobrane dla {row['d']}/{row['n']} śledzonych ofert")
@@ -200,6 +212,7 @@ def status_lines(conn):
         lines.append(f"kategoria {catalog_label(row['catalog_id'])}: partycji {row['n']}, suma total_entries "
                      f"{row['total'] if row['total'] is not None else '?'}, zebrano {row['items'] or 0}, "
                      f"oversize {row['oversize'] or 0}")
+    say("  partycje i ostatnie przejścia...")
     for row in conn.execute("SELECT * FROM crawl_runs ORDER BY id DESC LIMIT 5"):
         lines.append(f"przejście #{row['id']} kat. {row['catalog_id']}: start {row['started_at']}, koniec "
                      f"{row['finished_at'] or '(niedokończone)'}, zapytań {row['requests']}, "
@@ -207,7 +220,16 @@ def status_lines(conn):
                      f"zmienione {row['changed']}, zniknięte {row['gone']}, błędy {row['errors']}")
     if not lines:
         return ["Baza pusta - uruchom: python -m analyzer crawl"]
-    return lines + coverage_lines(conn)
+    return lines + coverage_lines(conn, progress=say)
+
+
+def data_size_line(db_path):
+    """Rozmiar plików bazy (analyzer.db + -wal + -shm) i folderu danych."""
+    base = Path(db_path)
+    files = [base, base.with_name(base.name + "-wal"), base.with_name(base.name + "-shm")]
+    db_mb = sum(f.stat().st_size for f in files if f.exists()) / 1e6
+    folder_mb = sum(f.stat().st_size for f in base.parent.rglob("*") if f.is_file()) / 1e6
+    return f"Baza: {db_mb:,.1f} MB ({base}), cały folder {base.parent}: {folder_mb:,.1f} MB"
 
 
 def main(argv=None):
@@ -275,8 +297,10 @@ def main(argv=None):
         conn.close()
     elif args.command == "sample":
         from .sample import export
+        print(f"Otwieram bazę {cfg.db_path} ...", flush=True)
         conn = db.connect(cfg.db_path)
-        path, counts = export(conn, Path(cfg.db_path).parent, args.per_category)
+        path, counts = export(conn, Path(cfg.db_path).parent, args.per_category,
+                              progress=lambda text: print(text, flush=True))
         conn.close()
         print(f"Zapisano {sum(counts.values())} ofert ({', '.join(f'{k} {v}' for k, v in counts.items())}) -> {path}")
         print(f"Rozmiar: {path.stat().st_size / 1e6:.1f} MB")
@@ -286,9 +310,15 @@ def main(argv=None):
         print("\n".join(report(conn)))
         conn.close()
     elif args.command == "status":
+        say = lambda text: print(text, flush=True)  # noqa: E731
+        say(f"Otwieram bazę {cfg.db_path} ...")
         conn = db.connect(cfg.db_path)
-        print("\n".join(status_lines(conn)))
+        lines = status_lines(conn, progress=say)
         conn.close()
+        say("")
+        print("\n".join(lines))
+        say("")
+        say(data_size_line(cfg.db_path))
 
 
 if __name__ == "__main__":
