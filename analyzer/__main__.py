@@ -8,6 +8,7 @@
   resolve [--limit N]                     zniknięte z katalogu -> sold / deleted / unlisted (1 zapytanie/ofertę)
   classify-report / reclassify            klasyfikacja ofert z kategorii mieszanych (bez sieci)
   classify-ai [--limit N]                 RAM + inna kategoria w tytule -> AI ocenia zdjęcie główne (bez proxy)
+  check <link|ID> [...]                   czy oferta jest sprzedana (1 zapytanie przez proxy) + co wie baza
   resolve-report                          dlaczego 0 sprzedanych: zapisane odpowiedzi resolvera + próbka do wysłania
   sample [--per-category N]               próbka ofert z opisami (bez danych sprzedawcy) -> data/sample_*.jsonl
   diag                                    zmiany cen i braki pokrycia w ostatnim przejściu (bez sieci)
@@ -119,6 +120,19 @@ async def cmd_classify_ai(cfg, limit, retry_failed):
         print("Stan sprawdzania zdjęć: " + (", ".join(f"{r[0]} {r[1]}" for r in left) or "nic do sprawdzenia"))
     finally:
         conn.close()
+
+
+async def cmd_check(cfg, items):
+    from .check import check
+
+    conn = db.connect(cfg.db_path) if Path(cfg.db_path).exists() else None
+    session = build_session()
+    try:
+        print("\n".join(await check(session, conn, items)))
+    finally:
+        await session.close()
+        if conn is not None:
+            conn.close()
 
 
 async def cmd_details(cfg, limit):
@@ -253,6 +267,8 @@ def main(argv=None):
     p_show.add_argument("folder", nargs="?", default=None, help="domyślnie najnowszy data/probe/*")
     sub.add_parser("status", help="podsumowanie bazy")
     sub.add_parser("diag", help="diagnostyka bazy (zmiany cen, braki pokrycia) - bez sieci")
+    p_check = sub.add_parser("check", help="czy oferta jest sprzedana: link(i) albo ID - jedno zapytanie na ofertę")
+    p_check.add_argument("items", nargs="+", help="link https://www.vinted.pl/items/... albo samo ID")
     sub.add_parser("resolve-report", help="diagnostyka rozpoznawania sprzedaży (zapisane odpowiedzi) - bez sieci")
     p_sample = sub.add_parser("sample", help="próbka ofert z opisami do projektu ekstrakcji -> data/sample_*.jsonl")
     p_sample.add_argument("--per-category", type=int, default=150)
@@ -297,6 +313,8 @@ def main(argv=None):
                                           or "brak"))
         print("\n".join(classify.report(conn)))
         conn.close()
+    elif args.command == "check":
+        asyncio.run(cmd_check(cfg, args.items))
     elif args.command == "resolve-report":
         from .resolve_diag import report
         print(f"Otwieram bazę {cfg.db_path} ...", flush=True)

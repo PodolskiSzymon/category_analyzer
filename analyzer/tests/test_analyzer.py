@@ -929,3 +929,29 @@ def test_resolve_report_on_real_responses(tmp_path):
     assert '"st.item_closing_action": "sold"' in text and '"http": 404' in text
     sample = next(tmp_path.glob("resolve_sample_*.jsonl")).read_text(encoding="utf-8")
     assert "zuziakarol" not in sample and len(sample.splitlines()) == 3      # bez danych sprzedawcy
+
+
+def test_check_command_on_real_responses():
+    from analyzer.check import check, parse_id
+    assert parse_id("https://www.vinted.pl/items/9011596531-laptop-dell?referrer=x") == 9011596531
+    assert parse_id("9011596531") == 9011596531
+
+    responses = {9272936873: (200, SNIPER_FIXTURES["sidebar_sold"]), 10327664119: (404, DELETED_BODY)}
+
+    class Client:
+        async def get(self, url, headers=None):
+            item_id = int(url.split("/items/")[1].split("/")[0])
+            status, body = responses[item_id]
+            return httpx.Response(status, json=body, request=httpx.Request("GET", url))
+
+    class Session:
+        client = Client()
+        traffic = type("T", (), {"add_http": lambda *a: None})()
+
+    conn = db.connect(":memory:")
+    conn.execute("INSERT INTO listings (id, catalog_id, title, first_seen, last_seen, state, state_at, category) "
+                 "VALUES (9272936873, 3580, 'Laptop', 'a', 'b', 'active', 'x', 'laptop')")
+    db.put_raw(conn, 9272936873, "catalog", {"id": 9272936873, "item_box": {"badge": {"title": "Sprzedane"}}})
+    text = "\n".join(asyncio.run(check(Session(), conn, ["https://www.vinted.pl/items/9272936873", "10327664119"])))
+    assert "program uznałby: SOLD" in text and "program uznałby: DELETED" in text
+    assert "stan active" in text and "Sprzedane" in text
