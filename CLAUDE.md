@@ -183,6 +183,24 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   gemini-3.8-flash / claude-haiku-5-5), cache `ai_cache` (task `photo_category_v1`), wynik `category_src='ai'`.
   W `watch` po przejściu katalogów (limit `ANALYZER_AI_CLASSIFY_LIMIT`=500/cykl); ręcznie `classify-ai
   [--limit N] [--retry-failed]`; `reclassify` oznacza konflikty w starych ofertach.
+* **⚠ SPRZEDAŻ NIE JEST ROZPOZNAWANA (2026-10-24, po 2 tyg. `watch`)** – `status`: 0 `sold`, 0 `closed` przy ~14 tys.
+  `deleted`, ~9 tys. `unlisted`, ~1,7 tys. `hidden`. Ustalenia z `check` u użytkownika:
+  - **sprzedana myszka 9011596531** (w przeglądarce „Sprzedane”, „Dodane 4 mies.”): stary sidebar
+    `www.vinted.pl/api/v2/items/{id}/details/sidebar` → **HTTP 404, code 104** = to samo co usunięta. 11.10 sprzedany
+    laptop dawał 200 + `item_closing_action=sold` → Vinted zmienił zachowanie (użytkownik: „kilka dni temu”; strona
+    pokazuje sprzedane, więc bierze status z innego źródła – NIE ustalone, czeka na cURL z F12; trop użytkownika
+    `api.vinted.pl/item-details/more-items/{id}?content_source=similar_items&screen=item` wygląda raczej na „podobne
+    oferty”, nie status – nie używać bez odpowiedzi z przeglądarki). Strona oferty może być renderowana na serwerze
+    (HTML) – wtedy status w HTML, a strona waży dużo więcej niż sidebar (koszt proxy).
+  - **aktywny MacBook 10292094832**: `deleted` od 2026-10-12, a `last_seen` 2026-10-24, `missed_runs` 0 – czyli był
+    w katalogu cały czas po oznaczeniu. Sidebar dziś: 200, aktywna. **Błąd A:** `deleted` / `sold` / `closed` nie są
+    w `db.REVIVABLE` → oferta widziana znów w katalogu zostaje `deleted` na zawsze. **Błąd B:** 404/104 nie znaczy
+    już „usunięta” (sprzedane też; możliwe też chwilowe 404 dla aktywnych – MacBook 12.10 dostał 404 i/lub zniknął na
+    2 przejścia, a był aktywny). Wniosek: `deleted` = mieszanka usuniętych, sprzedanych i fałszywych.
+  - Do zrobienia (po decyzji użytkownika): (1) oferta znów w katalogu → wraca do `active` (+ licznik „fałszywych
+    zniknięć”), (2) 404/104 → stan `gone_404` (nie wiadomo: usunięta albo sprzedana) z ponownym sprawdzeniem,
+    (3) nowe źródło statusu sprzedaży z F12, (4) jednorazowe ponowne sprawdzenie wszystkich `deleted` nowym źródłem
+    (dane – ceny, daty, opisy – są w bazie; sprzedane oferty Vinted pokazuje miesiącami).
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
