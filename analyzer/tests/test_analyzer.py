@@ -1127,3 +1127,16 @@ def test_recheck_progress_bar_and_pauses():
     assert "6/6 100.0%" in text and "-> deleted" in text and "chwila przerwy: 0:40" in text
     assert "[####################]" in text and "sprawdzam" in text
     assert sum(slept) >= 40          # przerwa odliczana co sekundę
+
+
+def test_recheck_links_for_browser_check():
+    from analyzer.__main__ import recheck_links
+    conn = db.connect(":memory:")
+    for i, (state, at) in enumerate([("sold", "2026-10-24T15:00"), ("hidden", "2026-10-24T15:01"),
+                                     ("deleted", "2026-10-24T15:02"), ("sold", "2026-10-01T00:00")], start=1):
+        conn.execute("INSERT INTO listings (id, catalog_id, title, first_seen, last_seen, state, state_at, category, "
+                     "price_now, sold_price, seller_price, seller_currency, services_at) "
+                     "VALUES (?, 3661, 'iPhone', 'x', 'x', ?, 'x', 'phone', 500, 480, 120, 'EUR', ?)", (i, state, at))
+    text = "\n".join(recheck_links(conn, "2026-10-24T14:00"))
+    assert "items/1 " in text and "480.00 zł (120 EUR)" in text and "items/2 " in text
+    assert "items/3 " not in text and "items/4 " not in text      # deleted nie pokazujemy, stara - nie z tego przebiegu

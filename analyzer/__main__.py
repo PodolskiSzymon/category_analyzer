@@ -123,7 +123,25 @@ async def cmd_classify_ai(cfg, limit, retry_failed):
         conn.close()
 
 
-async def cmd_recheck(cfg, states, limit, again, human=True, delay=(1.0, 2.5)):
+def recheck_links(conn, since, show=("sold", "hidden"), per_state=50):
+    """Linki do ofert, którym recheck (od `since`) ustawił jeden ze stanów `show` - do sprawdzenia w przeglądarce."""
+    lines = []
+    for state in show:
+        rows = conn.execute("SELECT id, category, price_now, sold_price, seller_price, seller_currency, title "
+                            "FROM listings WHERE services_at >= ? AND state = ? ORDER BY id DESC LIMIT ?",
+                            (since, state, per_state)).fetchall()
+        if not rows:
+            continue
+        lines.append(f"{state} ({len(rows)}{'+' if len(rows) == per_state else ''}):")
+        for r in rows:
+            price = r["sold_price"] if state == "sold" and r["sold_price"] is not None else r["price_now"]
+            seller = f" ({r['seller_price']:g} {r['seller_currency']})" if r["seller_price"] else ""
+            lines.append(f"  https://www.vinted.pl/items/{r['id']}  {r['category']:<8} {price or 0:>9.2f} zł{seller}  "
+                         f"{(r['title'] or '')[:50]}")
+    return lines
+
+
+async def cmd_recheck(cfg, states, limit, again, human=True, delay=(1.0, 2.5), show=("sold", "hidden")):
     from .pacing import HumanPacer
     from .progress import ConsoleBar
     from .resolver import recheck
@@ -138,9 +156,13 @@ async def cmd_recheck(cfg, states, limit, again, human=True, delay=(1.0, 2.5)):
     cfg.page_delay = delay
     conn = db.connect(cfg.db_path)
     session = build_session()
+    since = db.utcnow()
     try:
         await recheck(cfg, session, conn, states, limit, again, pacer=pacer, progress=bar)
         bar.finish()
+        links = recheck_links(conn, since, show)
+        if links:
+            print("\nDo sprawdzenia w przeglądarce (wyniki tego uruchomienia):\n" + "\n".join(links) + "\n", flush=True)
         log.info("[TRANSFER] %s", session.traffic.window_report()[0])
         for row in conn.execute("SELECT category, state, COUNT(*) AS n FROM listings WHERE services_at IS NOT NULL "
                                 "GROUP BY category, state ORDER BY category, n DESC"):
@@ -306,6 +328,11 @@ def main(argv=None):
     p_recheck.add_argument("--again", action="store_true", help="także oferty już sprawdzone przez /services")
     p_recheck.add_argument("--delay", default="1-2.5", help="odstęp między ofertami w s, losowo z zakresu "
                                                            "(domyślnie 1-2.5)")
+    p_recheck.add_argument("--show", default="sold,hidden",
+                           help="po zakończeniu wypisz linki ofert z tymi wynikami (domyślnie sold,hidden; np. "
+                                "sold,hidden,deleted,active)")
+    p_recheck.add_argument("--links-only", action="store_true",
+                           help="bez sprawdzania - tylko linki z dotychczasowych wyników recheck (--show)")
     p_recheck.add_argument("--no-pauses", action="store_true", help="bez przerwy co ~pół godziny (tylko odstępy)")
     p_check = sub.add_parser("check", help="czy oferta jest sprzedana: link(i) albo ID - jedno zapytanie na ofertę")
     p_check.add_argument("items", nargs="+", help="link https://www.vinted.pl/items/... albo samo ID")
@@ -357,7 +384,13 @@ def main(argv=None):
         states = tuple(x.strip() for x in args.states.split(",") if x.strip())
         from .config import parse_range
         delay = parse_range(args.delay, (1.0, 2.5))
-        asyncio.run(cmd_recheck(cfg, states, args.limit, args.again, human=not args.no_pauses, delay=delay))
+        show = tuple(x.strip() for x in args.show.split(",") if x.strip())
+        if args.links_only:
+            conn = db.connect(cfg.db_path)
+            print("\n".join(recheck_links(conn, "", show, per_state=200)) or "Brak wyników recheck w tych stanach.")
+            conn.close()
+            return
+        asyncio.run(cmd_recheck(cfg, states, args.limit, args.again, human=not args.no_pauses, delay=delay, show=show))
     elif args.command == "check":
         asyncio.run(cmd_check(cfg, args.items))
     elif args.command == "resolve-report":
