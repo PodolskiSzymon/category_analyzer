@@ -31,13 +31,16 @@ Każde pole ma **wartość + źródło**. Dozwolone źródła:
 | `title` | tytuł oferty | 1.0 |
 | `description` | opis oferty | 1.0 |
 | `attribute` | atrybut z formularza Vinted (marka, stan, kategoria…) | 1.0 (po normalizacji, patrz 0.4) |
-| `photo` | odczytane jednoznacznie ze zdjęcia (naklejka znamionowa, zrzut ustawień, pudełko) | 0.9 |
-| `model_guess` | wywnioskowane z wiedzy o modelu (np. numer modelu → GPU, panel, TGP) | 0.7 |
-| `photo_guess` | oszacowane ze zdjęcia (stan wizualny, rozpoznanie modelu po obudowie) | 0.5 |
+| `photo` | odczytane jednoznacznie ze zdjęcia (naklejka znamionowa, zrzut ustawień / Menedżera urządzeń, pudełko) – z `evidence` | 1.0 |
+| `model_guess` | wywnioskowane z wiedzy o modelu (np. numer modelu → GPU, panel, TGP) | 0.9 |
+| `photo_guess` | oszacowane ze zdjęcia (stan wizualny, rozpoznanie modelu po obudowie) – z `evidence` | 0.85 |
 | `none` | szukano, nie ma | – |
 
 *(poprawka Claude 2026-10-12)* Ta sama liczba jest **wagą oferty przy liczeniu mediany** (sekcja 2, 3) – jeden system wag zamiast
 dwóch; wartości startowe, do kalibracji na trafności zgadywania (sekcja 3).
+*(decyzja użytkownika 2026-10-24)* Zgadywanie tylko **niewiele mniej ważne** od pewnych danych (0.9 / 0.85, nie 0.7 / 0.5),
+a to, co AI **odczytało** ze zdjęcia (naklejka, zrzut ekranu), jest tak samo pewne jak tekst (1.0). AI zawsze podaje,
+czy wartość odczytało (`photo`), czy zgaduje (`photo_guess` / `model_guess`), i w `evidence` – na którym zdjęciu i co widać.
 
 „Nie podano” jest informacją samą w sobie (np. brak liczby cykli baterii w ofercie MacBooka zwykle obniża cenę,
 brak zdjęcia włączonego ekranu to ryzyko).
@@ -157,8 +160,8 @@ GPU zawsze zaznaczamy w `confidence_overall` jako `medium` lub niżej, dopóki k
 Segment ustalamy regułami (model/linia, GPU, słowa w tytule), oferta może mieć segment główny + cechy
 (np. „biznesowy” + „dotykowy”). Klucz konfiguracji = pola, po których grupujemy ceny w raportach. Pole klucza
 pochodzące ze zgadywania (`model_guess`, `photo_guess`) oznaczamy w raporcie – oferta trafia do grupy, ale
-z niższą wagą przy liczeniu mediany – *(poprawka Claude 2026-10-12)* waga = pewność źródła z tabeli 0.2 (`model_guess` 0.7,
-`photo_guess` 0.5), zamiast osobnej wagi 0.2.
+z niższą wagą przy liczeniu mediany – *(poprawka Claude 2026-10-12)* waga = pewność źródła z tabeli 0.2 (`model_guess` 0.9,
+`photo_guess` 0.85 – decyzja użytkownika 2026-10-24), zamiast osobnej wagi 0.2.
 
 | Segment | Kto kupuje / na co patrzy | Klucz konfiguracji (grupowanie cen) | Dodatkowe pola specyficzne |
 |---|---|---|---|

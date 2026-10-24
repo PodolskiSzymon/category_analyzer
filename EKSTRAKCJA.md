@@ -33,13 +33,17 @@ Każde pole to obiekt `value` + `source` (+ `evidence` przy polach krytycznych),
 | `source` | Znaczenie | Dopisek w specyfikacjach kategorii / dla człowieka | Waga w medianie |
 |---|---|---|---|
 | `title`, `description`, `attribute` | podane wprost | brak dopisku | 1.0 |
-| `photo` | jednoznacznie na zdjęciu | „(ze zdjęcia)” | 0.9 |
-| `model_guess` | wywnioskowane z modelu | „(zgaduję: model)” | 0.7 |
-| `photo_guess` | oszacowane ze zdjęcia | „(zgaduję: zdjęcie)” | 0.5 |
+| `photo` | **odczytane** ze zdjęcia: naklejka znamionowa, zrzut ustawień / Menedżera urządzeń / „Informacje o systemie”, pudełko – `evidence` obowiązkowe | „(ze zdjęcia)” | 1.0 |
+| `model_guess` | wywnioskowane z modelu (numer modelu → GPU, panel) | „(zgaduję: model)” | 0.9 |
+| `photo_guess` | **rozpoznane** ze zdjęcia bez napisu (wygląd obudowy, układ portów, stan wizualny) – `evidence` obowiązkowe | „(zgaduję: zdjęcie)” | 0.85 |
 | `none` | szukano, nie ma | – | – |
 
-Dopiski w tabelach specyfikacji kategorii oznaczają właśnie te wartości `source`. Wagi startowe – do kalibracji
-na trafności zgadywania (odsetek zgadnięć zgodnych z później potwierdzoną wartością).
+**Decyzja użytkownika 2026-10-24:** zgadnięte wartości tylko niewiele mniej ważne od pewnych (0.9 / 0.85), a odczytane
+ze zdjęcia tak samo pewne jak tekst. Przykład: opis nie podaje GPU, ale na zdjęciu jest naklejka „GeForce RTX 3060”
+albo zrzut Menedżera urządzeń → `{"value": "RTX 3060", "source": "photo", "evidence": "zdjęcie 3: naklejka na
+obudowie"}`; jeśli widać tylko obudowę Legiona 5 i AI wnioskuje GPU z modelu → `model_guess`. Wagi startowe – do
+kalibracji: gdy później ta sama wartość wyjdzie pewnie (z opisu innej oferty tego modelu, ze sprzedaży), liczymy,
+jak często zgadywanie trafiało, i obniżamy wagę tylko wtedy, gdy trafia rzadko.
 
 Zasady wspólne (szczegóły w plikach kategorii):
 1. Tekst > zdjęcie > model. Sprzeczność → wartość z mocniejszego dowodu + flaga `inconsistency`.
@@ -86,4 +90,7 @@ wgniecenia, głębokie rysy · `D` pęknięcia/uszkodzenia · `unknown`. Słabe 
 1. Reguły (`extract`) – rdzeń + identyfikacja modelu + najczęstsze pola tekstowe, z raportem pokrycia per pole.
 2. Tabela `models` – lista modeli z bazy (po `config_key`), specyfikacja raz na model (AI wsadowo + ręczne poprawki).
 3. AI wsadowo dla ofert, w których reguły nie ustaliły pól klucza lub pól krytycznych (cache po `content_hash`).
-4. Zdjęcia – tylko gdy tekst nie rozstrzyga pól klucza (model/wariant/rewizja) albo do flag ryzyka.
+4. Zdjęcia – gdy tekst (reguły + AI na tekście) nie ustalił pól klucza (model, CPU, GPU, RAM, dysk) albo stanu:
+   AI dostaje do 4 zdjęć (URL-e – pobiera je dostawca AI, bez proxy) i dla każdego pola mówi, czy je **odczytało**
+   (`photo`), czy **zgaduje** (`photo_guess` / `model_guess`), z `evidence`. Póki oferta jest aktywna (zdjęcia
+   usuniętych ofert znikają).
