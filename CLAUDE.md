@@ -220,6 +220,17 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   (np. 9011596531). ⚠ Zawartość odpowiedzi `/services` jeszcze nieznana – czy rozróżnia sprzedaną / aktywną / usuniętą
   (i ile waży) – czeka na Response z F12 dla: sprzedanej, aktywnej i naprawdę usuniętej oferty. Jeśli rozróżnia,
   to jest tańsze źródło statusu niż strona HTML (~30 KB przy przerwanym pobieraniu).
+* **`/services` – zawartość (Response od użytkownika 2026-10-24)**: sprzedana myszka i aktywny MacBook mają TĘ SAMĄ
+  budowę, **bez pola statusu**: `services.buyer_protection` (opłata 5% + 2,90 zł), `services.shipping` (cena wysyłki,
+  także w walucie sprzedawcy + `exchange_rate`), `original_asking_amount` (cena w zł), `seller_original_asking_amount`
+  (cena w walucie sprzedawcy, np. 55.0 RON, 2299.0 DKK), `total_amount`. ~1,3 KB. Sama w sobie NIE rozróżnia
+  sprzedanej od aktywnej. **Pomysł (do potwierdzenia):** status z pary zapytań – sidebar 200 → aktywna / zarezerwowana /
+  ukryta (stary `item_status`); sidebar 404/104 + `/services` 200 → oferta istnieje, ale sidebar jej nie pokazuje →
+  **sprzedana** (myszka); sidebar 404/104 + `/services` 404 → **usunięta**. Do tego `/services` daje cenę w chwili
+  sprawdzenia w zł i w walucie sprzedawcy (cena sprzedaży bez kursowego dryfu). ⚠ Potrzebne przed użyciem:
+  `/services` dla naprawdę usuniętej oferty (404?), dla ukrytej i zarezerwowanej (czy sidebar dla nich też daje 404 –
+  wtedy pomyliłyby się ze sprzedanymi), oraz walidacja na próbce: kilkadziesiąt ofert sprawdzonych parą zapytań
+  i stroną HTML (`buyer_item_status`) – zgodność > ~98%, inaczej status ze strony HTML.
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
