@@ -219,9 +219,14 @@ async def _pause(seconds, label, sleep, progress, state):
         left -= step
 
 
-async def _run(cfg, session, conn, rows, tag, sleep=asyncio.sleep, verbose=True, pacer=None, progress=None):
+RATE_LIMIT_WAITS = (300, 900, 1800, 3600)    # 429 w recheck: czekamy 5, 15, 30, potem co 60 min
+
+
+async def _run(cfg, session, conn, rows, tag, sleep=asyncio.sleep, verbose=True, pacer=None, progress=None,
+               wait_on_429=False):
     """Sprawdza oferty po kolei (resolve_item) i zapisuje wyniki. Zwraca {stan: liczba}.
-    pacer - HumanPacer („ludzkie” przerwy) zamiast cfg.pick_delay(); progress(dict) - pasek postępu (recheck)."""
+    pacer - HumanPacer („ludzkie” przerwy) zamiast cfg.pick_delay(); progress(dict) - pasek postępu (recheck);
+    wait_on_429 - przy „za dużo zapytań” czekaj (RATE_LIMIT_WAITS) i ponów tę samą ofertę zamiast przerywać."""
     import time
 
     counts = {}
@@ -235,14 +240,27 @@ async def _run(cfg, session, conn, rows, tag, sleep=asyncio.sleep, verbose=True,
         state.update(n=n, row=row)
         if progress:
             progress(dict(state, stage="check"))
-        try:
-            res = await resolve_item(session, row["id"])
-        except RateLimited:
+        res, limited, stop = None, 0, False
+        while res is None:
+            try:
+                res = await resolve_item(session, row["id"])
+            except RateLimited:
+                if not wait_on_429:
+                    stop = True
+                    break
+                wait = RATE_LIMIT_WAITS[min(limited, len(RATE_LIMIT_WAITS) - 1)]
+                limited += 1
+                log.warning("[%s] 429 (za dużo zapytań) - czekam %d min i ponawiam (%d. raz z rzędu).", tag,
+                            wait // 60, limited)
+                await _pause(wait, "429 - czekam", sleep, progress, state)
+            except Exception as exc:  # sieć / proxy - ta oferta poczeka do następnego razu
+                log.warning("[%s] %s: błąd %r", tag, row["id"], exc)
+                counts["błąd"] = counts.get("błąd", 0) + 1
+                break
+        if stop:
             log.warning("[%s] 429 - przerywam, reszta przy następnym uruchomieniu.", tag)
             break
-        except Exception as exc:  # sieć / proxy - ta oferta poczeka do następnego razu
-            log.warning("[%s] %s: błąd %r", tag, row["id"], exc)
-            counts["błąd"] = counts.get("błąd", 0) + 1
+        if res is None:
             continue
         result, reason = _below_min(cfg, row, res)
         status_code, body = res.sidebar if res.sidebar else (None, None)
@@ -288,10 +306,11 @@ def recheck_candidates(conn, states=RECHECK_STATES, limit=None, again=False):
 
 
 async def recheck(cfg, session, conn, states=RECHECK_STATES, limit=None, again=False, sleep=asyncio.sleep,
-                  pacer=None, progress=None):
+                  pacer=None, progress=None, wait_on_429=True):
     """Jednorazowa naprawa (2026-10-24): oferty oznaczone dawną metodą (`deleted` = sprzedane + usunięte + aktywne)
     sprawdzane od nowa: /services → (sidebar) → deleted / sold / active / unlisted / hidden / reserved.
     Można przerwać i wznowić - pomija już sprawdzone (services_at)."""
     rows = recheck_candidates(conn, states, limit, again)
     log.info("[RECHECK] Do sprawdzenia: %d ofert (stany: %s).", len(rows), ", ".join(states))
-    return await _run(cfg, session, conn, rows, "RECHECK", sleep, verbose=False, pacer=pacer, progress=progress)
+    return await _run(cfg, session, conn, rows, "RECHECK", sleep, verbose=False, pacer=pacer, progress=progress,
+                      wait_on_429=wait_on_429)

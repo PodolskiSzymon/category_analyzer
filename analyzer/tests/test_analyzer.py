@@ -1155,3 +1155,41 @@ def test_recheck_links_for_browser_check():
     text = "\n".join(recheck_links(conn, "2026-10-24T14:00"))
     assert "items/1 " in text and "480.00 zł (120 EUR)" in text and "items/2 " in text
     assert "items/3 " not in text and "items/4 " not in text      # deleted nie pokazujemy, stara - nie z tego przebiegu
+
+
+def test_recheck_waits_on_429_and_retries():
+    from analyzer.resolver import recheck, resolve
+
+    market = FakeMarket(market_prices(100, seed=25))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    ids = sorted(market.items)[:3]
+    with conn:
+        conn.execute("UPDATE listings SET state='deleted' WHERE id IN (?, ?, ?)", ids)
+    hits = {"n": 0}
+
+    def handler(request):
+        hits["n"] += 1
+        if hits["n"] in (2, 3):                       # druga oferta: dwa razy „za dużo zapytań”
+            return httpx.Response(429, json={})
+        return httpx.Response(404, json=SERVICES_DELETED)
+
+    slept = []
+
+    async def fake_sleep(s):
+        slept.append(s)
+
+    async def go(fn, **kw):
+        session = await _mock_session(handler)
+        try:
+            return await fn(make_cfg(), session, conn, sleep=fake_sleep, **kw)
+        finally:
+            await session.client.aclose()
+
+    assert asyncio.run(go(recheck)) == {"deleted": 3}          # nic nie przepadło
+    assert 300 in slept and 900 in slept                         # czekał 5 i 15 min
+    # resolve w watch nadal przerywa przy 429 (reszta w następnym cyklu)
+    with conn:
+        conn.execute("UPDATE listings SET state='gone_pending' WHERE id IN (?, ?, ?)", ids)
+    hits["n"] = 1                                                 # pierwsze zapytanie dostanie 429
+    assert asyncio.run(go(resolve)) == {}
+    assert conn.execute("SELECT COUNT(*) FROM listings WHERE state='gone_pending'").fetchone()[0] == 3

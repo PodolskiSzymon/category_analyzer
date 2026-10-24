@@ -141,7 +141,7 @@ def recheck_links(conn, since, show=("sold", "hidden"), per_state=50):
     return lines
 
 
-async def cmd_recheck(cfg, states, limit, again, human=True, delay=(0.6, 1.5), show=("sold", "hidden")):
+async def cmd_recheck(cfg, states, limit, again, human=False, delay=(0.6, 1.5), show=("sold", "hidden")):
     from .pacing import HumanPacer
     from .progress import ConsoleBar
     from .resolver import recheck
@@ -153,7 +153,7 @@ async def cmd_recheck(cfg, states, limit, again, human=True, delay=(0.6, 1.5), s
     pacer = HumanPacer(base=delay) if human else None
     log.info("[RECHECK] Tempo: odstęp losowo %g-%g s%s. Cały ruch do Vinted przez proxy (SNIPER_PROXY_*).", *delay,
              ", mniej więcej co pół godziny przerwa 10-120 s, po 12 h pracy odpoczynek 8 h" if human
-             else " (bez przerw)")
+             else " bez przerw (--pauses: przerwy co ~pół godziny i 8 h po 12 h); przy 429 czekam 5/15/30/60 min")
     cfg.page_delay = delay
     conn = db.connect(cfg.db_path)
     session = build_session()
@@ -334,7 +334,8 @@ def main(argv=None):
                                 "sold,hidden,deleted,active)")
     p_recheck.add_argument("--links-only", action="store_true",
                            help="bez sprawdzania - tylko linki z dotychczasowych wyników recheck (--show)")
-    p_recheck.add_argument("--no-pauses", action="store_true", help="bez przerw co ~pół godziny i bez 8 h odpoczynku (tylko odstępy)")
+    p_recheck.add_argument("--pauses", action="store_true",
+                           help="„ludzkie” przerwy: co ~pół godziny 10-120 s i 8 h odpoczynku po 12 h (domyślnie bez)")
     p_check = sub.add_parser("check", help="czy oferta jest sprzedana: link(i) albo ID - jedno zapytanie na ofertę")
     p_check.add_argument("items", nargs="+", help="link https://www.vinted.pl/items/... albo samo ID")
     sub.add_parser("resolve-report", help="diagnostyka rozpoznawania sprzedaży (zapisane odpowiedzi) - bez sieci")
@@ -391,7 +392,7 @@ def main(argv=None):
             print("\n".join(recheck_links(conn, "", show, per_state=200)) or "Brak wyników recheck w tych stanach.")
             conn.close()
             return
-        asyncio.run(cmd_recheck(cfg, states, args.limit, args.again, human=not args.no_pauses, delay=delay, show=show))
+        asyncio.run(cmd_recheck(cfg, states, args.limit, args.again, human=args.pauses, delay=delay, show=show))
     elif args.command == "check":
         asyncio.run(cmd_check(cfg, args.items))
     elif args.command == "resolve-report":
