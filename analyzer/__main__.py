@@ -8,6 +8,7 @@
   resolve [--limit N]                     zniknięte z katalogu -> sold / deleted / unlisted (1 zapytanie/ofertę)
   classify-report / reclassify            klasyfikacja ofert z kategorii mieszanych (bez sieci)
   classify-ai [--limit N]                 RAM + inna kategoria w tytule -> AI ocenia zdjęcie główne (bez proxy)
+  sample [--per-category N]               próbka ofert z opisami (bez danych sprzedawcy) -> data/sample_*.jsonl
   diag                                    zmiany cen i braki pokrycia w ostatnim przejściu (bez sieci)
   status                                  podsumowanie bazy (oferty, stany, partycje, przejścia, transfer)
 """
@@ -229,6 +230,8 @@ def main(argv=None):
     p_show.add_argument("folder", nargs="?", default=None, help="domyślnie najnowszy data/probe/*")
     sub.add_parser("status", help="podsumowanie bazy")
     sub.add_parser("diag", help="diagnostyka bazy (zmiany cen, braki pokrycia) - bez sieci")
+    p_sample = sub.add_parser("sample", help="próbka ofert z opisami do projektu ekstrakcji -> data/sample_*.jsonl")
+    p_sample.add_argument("--per-category", type=int, default=150)
     sub.add_parser("classify-report", help="klasyfikacja ofert z kategorii mieszanych - bez sieci")
     sub.add_parser("reclassify", help="ponowna klasyfikacja zapisanych ofert po poprawce reguł - bez sieci")
     p_ai = sub.add_parser("classify-ai", help="kategoria ze zdjęcia głównego (AI) dla ofert 'RAM + coś innego' w tytule")
@@ -270,6 +273,13 @@ def main(argv=None):
                                           or "brak"))
         print("\n".join(classify.report(conn)))
         conn.close()
+    elif args.command == "sample":
+        from .sample import export
+        conn = db.connect(cfg.db_path)
+        path, counts = export(conn, Path(cfg.db_path).parent, args.per_category)
+        conn.close()
+        print(f"Zapisano {sum(counts.values())} ofert ({', '.join(f'{k} {v}' for k, v in counts.items())}) -> {path}")
+        print(f"Rozmiar: {path.stat().st_size / 1e6:.1f} MB")
     elif args.command == "diag":
         from .diag import report
         conn = db.connect(cfg.db_path)

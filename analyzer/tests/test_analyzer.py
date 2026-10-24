@@ -899,3 +899,17 @@ def test_reclassify_marks_ram_conflicts_pending():
                  "category_src) VALUES (1, 3582, 'Laptop Dell 16GB RAM', 'x', 'x', 'active', 'x', 'laptop', 'rule')")
     reclassify(conn)
     assert conn.execute("SELECT category_check FROM listings").fetchone()[0] == "pending"
+
+
+def test_sample_export_redacts_contacts(tmp_path):
+    from analyzer.sample import export
+    conn = db.connect(":memory:")
+    conn.execute("INSERT INTO listings (id, catalog_id, title, first_seen, last_seen, state, state_at, category) "
+                 "VALUES (1, 3580, 'Laptop Dell', 'x', 'x', 'sold', 'x', 'laptop')")
+    conn.execute("INSERT INTO details (listing_id, fetched_at, description, attributes_json) VALUES "
+                 "(1, 'x', 'i5-8350U 16GB, pisz jan.kowalski@wp.pl lub 600 123 456, www.allegro.pl/x', '{\"status\": \"Dobry\"}')")
+    path, counts = export(conn, tmp_path, 10)
+    row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+    assert counts == {"laptop": 1} and row["attributes"] == {"status": "Dobry"}
+    assert "kowalski" not in row["description"] and "123 456" not in row["description"]
+    assert "allegro" not in row["description"] and "i5-8350U 16GB" in row["description"]
