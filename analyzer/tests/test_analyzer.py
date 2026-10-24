@@ -1081,7 +1081,7 @@ def test_human_pacer_has_breaks_and_uneven_gaps():
     import random
     from analyzer.pacing import HumanPacer
     now = [0.0]
-    pacer = HumanPacer(base=(2.0, 6.0), rng=random.Random(1), clock=lambda: now[0])
+    pacer = HumanPacer(rng=random.Random(1), clock=lambda: now[0])          # domyślnie 1-2,5 s, przerwa 10-120 s
     delays = []
     while now[0] < 5 * 3600:                     # 5 godzin pracy
         delay, label = pacer.next()
@@ -1090,9 +1090,9 @@ def test_human_pacer_has_breaks_and_uneven_gaps():
     breaks = [d for d, label in delays if label == "chwila przerwy"]
     normal = [d for d, label in delays if label is None]
     assert 8 <= len(breaks) <= 12                # ~raz na pół godziny
-    assert all(60 <= d <= 180 for d in breaks)
-    assert all(2 <= d <= 6 for d in normal) and len({round(d, 1) for d in normal}) > 30    # nierówne odstępy
-    assert 3.0 < sum(normal) / len(normal) < 4.0
+    assert all(10 <= d <= 120 for d in breaks)
+    assert all(1 <= d <= 2.5 for d in normal) and len({round(d, 2) for d in normal}) > 100   # nierówne odstępy
+    assert 1.6 < sum(normal) / len(normal) < 1.9
 
 
 def test_recheck_progress_bar_and_pauses():
