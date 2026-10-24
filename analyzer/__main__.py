@@ -134,8 +134,8 @@ async def cmd_recheck(cfg, states, limit, again, human=True):
         handler.addFilter(bar)          # wpisy logu nie rozjeżdżają paska
     pacer = HumanPacer(base=cfg.page_delay) if human else None
     if human:
-        log.info("[RECHECK] Tempo „ludzkie”: odstęp %g-%g s, co 25-60 ofert przerwa 0,5-2 min, co 300-600 ofert "
-                 "5-15 min (bez przerw: --no-pauses).", *cfg.page_delay)
+        log.info("[RECHECK] Tempo „ludzkie”: odstęp %g-%g s, mniej więcej co pół godziny przerwa 1-3 min "
+                 "(bez przerw: --no-pauses). Cały ruch do Vinted przez proxy (SNIPER_PROXY_*).", *cfg.page_delay)
     conn = db.connect(cfg.db_path)
     session = build_session()
     try:
@@ -306,7 +306,7 @@ def main(argv=None):
     p_recheck.add_argument("--again", action="store_true", help="także oferty już sprawdzone przez /services")
     p_recheck.add_argument("--delay", default=None, help="przerwa między ofertami w s, np. 2-4 (domyślnie jak "
                                                          "ANALYZER_PAGE_DELAY_S, 2-6)")
-    p_recheck.add_argument("--no-pauses", action="store_true", help="bez dłuższych „ludzkich” przerw (tylko odstępy)")
+    p_recheck.add_argument("--no-pauses", action="store_true", help="bez przerwy co ~pół godziny (tylko odstępy)")
     p_check = sub.add_parser("check", help="czy oferta jest sprzedana: link(i) albo ID - jedno zapytanie na ofertę")
     p_check.add_argument("items", nargs="+", help="link https://www.vinted.pl/items/... albo samo ID")
     sub.add_parser("resolve-report", help="diagnostyka rozpoznawania sprzedaży (zapisane odpowiedzi) - bez sieci")

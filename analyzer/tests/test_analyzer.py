@@ -1080,13 +1080,17 @@ def test_details_404_resolved_by_services():
 def test_human_pacer_has_breaks_and_uneven_gaps():
     import random
     from analyzer.pacing import HumanPacer
-    pacer = HumanPacer(base=(2.0, 6.0), rng=random.Random(1))
-    delays = [pacer.next() for _ in range(1300)]
-    shorts = [d for d, label in delays if label == "krótka przerwa"]
-    longs = [d for d, label in delays if label == "dłuższa przerwa"]
+    now = [0.0]
+    pacer = HumanPacer(base=(2.0, 6.0), rng=random.Random(1), clock=lambda: now[0])
+    delays = []
+    while now[0] < 5 * 3600:                     # 5 godzin pracy
+        delay, label = pacer.next()
+        delays.append((delay, label))
+        now[0] += delay + 1.0                    # + czas zapytania
+    breaks = [d for d, label in delays if label == "chwila przerwy"]
     normal = [d for d, label in delays if label is None]
-    assert 20 <= len(shorts) <= 60 and 2 <= len(longs) <= 5
-    assert all(30 <= d <= 120 for d in shorts) and all(300 <= d <= 900 for d in longs)
+    assert 8 <= len(breaks) <= 12                # ~raz na pół godziny
+    assert all(60 <= d <= 180 for d in breaks)
     assert all(2 <= d <= 6 for d in normal) and len({round(d, 1) for d in normal}) > 30    # nierówne odstępy
     assert 3.0 < sum(normal) / len(normal) < 4.0
 
@@ -1111,7 +1115,8 @@ def test_recheck_progress_bar_and_pauses():
     async def go():
         session = await _mock_session(_vinted(routes))
         try:
-            pacer = HumanPacer(base=(2.0, 4.0), short_every=(3, 3), short_pause=(40.0, 40.0))
+            ticks = iter([0.0] + [10.0 ** 6] * 100)        # start, potem „pół godziny później” - przerwa
+            pacer = HumanPacer(base=(2.0, 4.0), break_len=(40.0, 40.0), clock=lambda: next(ticks))
             return await recheck(make_cfg(), session, conn, sleep=fake_sleep, pacer=pacer,
                                  progress=ConsoleBar(stream=out, width=150))
         finally:
@@ -1119,6 +1124,6 @@ def test_recheck_progress_bar_and_pauses():
 
     assert asyncio.run(go()) == {"deleted": 6}
     text = out.getvalue()
-    assert "6/6 100.0%" in text and "-> deleted" in text and "krótka przerwa: 0:40" in text
+    assert "6/6 100.0%" in text and "-> deleted" in text and "chwila przerwy: 0:40" in text
     assert "[####################]" in text and "sprawdzam" in text
     assert sum(slept) >= 40          # przerwa odliczana co sekundę

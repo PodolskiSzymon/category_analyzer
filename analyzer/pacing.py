@@ -1,37 +1,30 @@
-"""„Ludzkie” tempo zapytań (prośba użytkownika 2026-10-24, recheck): nierówne odstępy zamiast stałego rytmu.
+"""„Ludzkie” tempo zapytań (recheck): nierówne odstępy zamiast stałego rytmu.
 
-* zwykły odstęp: losowy z zakresu `base` (np. 2-6 s), częściej bliżej dolnej granicy (rozkład beta), czasem
-  „zamyślenie” o kilka sekund dłużej,
-* co 25-60 ofert krótka przerwa 30-120 s,
-* co 300-600 ofert dłuższa przerwa 5-15 min.
-Odstępy liczone od końca poprzedniego zapytania. Przy kilkunastu tysiącach ofert przerwy wydłużają całość o ~20-25%.
+Ustawienia użytkownika (2026-10-24): bez częstych „chwil namysłu” i długich przerw - tylko:
+* zwykły odstęp: losowy z zakresu `base` (np. 2-6 s), częściej bliżej dolnej granicy (rozkład beta),
+* mniej więcej raz na pół godziny (losowo 25-35 min) trochę dłuższa chwila: 1-3 min.
+Przy kilkunastu tysiącach ofert przerwy wydłużają całość tylko o ~5%.
 """
 import random
+import time
 
 
 class HumanPacer:
-    def __init__(self, base=(2.0, 6.0), rng=None, short_every=(25, 60), short_pause=(30.0, 120.0),
-                 long_every=(300, 600), long_pause=(300.0, 900.0), think_chance=0.08, think=(3.0, 10.0)):
-        self.base, self.rng = base, rng or random.Random()
-        self.short_every, self.short_pause = short_every, short_pause
-        self.long_every, self.long_pause = long_every, long_pause
-        self.think_chance, self.think = think_chance, think
-        self.count = 0
-        self.next_short = self.rng.randint(*short_every)
-        self.next_long = self.rng.randint(*long_every)
+    def __init__(self, base=(2.0, 6.0), rng=None, break_every_min=(25.0, 35.0), break_len=(60.0, 180.0),
+                 clock=time.monotonic):
+        self.base, self.rng, self.clock = base, rng or random.Random(), clock
+        self.break_every_min, self.break_len = break_every_min, break_len
+        self.next_break = self.clock() + self._interval()
+
+    def _interval(self):
+        return self.rng.uniform(*self.break_every_min) * 60
 
     def next(self):
         """(sekundy, opis) przerwy przed kolejną ofertą; opis None = zwykły odstęp."""
-        self.count += 1
-        if self.count >= self.next_long:
-            self.next_long = self.count + self.rng.randint(*self.long_every)
-            self.next_short = self.count + self.rng.randint(*self.short_every)
-            return self.rng.uniform(*self.long_pause), "dłuższa przerwa"
-        if self.count >= self.next_short:
-            self.next_short = self.count + self.rng.randint(*self.short_every)
-            return self.rng.uniform(*self.short_pause), "krótka przerwa"
+        now = self.clock()
+        if now >= self.next_break:
+            pause = self.rng.uniform(*self.break_len)
+            self.next_break = now + pause + self._interval()
+            return pause, "chwila przerwy"
         lo, hi = self.base
-        delay = lo + (hi - lo) * self.rng.betavariate(2, 3)
-        if self.rng.random() < self.think_chance:
-            return delay + self.rng.uniform(*self.think), "chwila namysłu"
-        return delay, None
+        return lo + (hi - lo) * self.rng.betavariate(2, 3), None
