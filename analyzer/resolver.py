@@ -5,6 +5,15 @@ Odpowiedzi potwierdzone u użytkownika (2026-10-11):
                  (karta pamięci 9238023547, laptop 10295873538; fixture sniper/tests/fixtures.json sidebar_sold),
   * usunięta   - HTTP 404, code 104 (oferta 10327664119 usunięta przez użytkownika; strona: „Page not found”),
   * aktywna    - HTTP 200, item_closing_action=null (sidebar_active).
+**Zmiana Vinted (ustalenia użytkownika 2026-10-24):** sidebar SPRZEDANEJ oferty zwraca teraz 404/104 - tak samo jak
+usuniętej. Rozróżnia je `/api/v2/items/{id}/services` (z przeglądarki użytkownika): odpowiada (200, ceny i opłaty) dla
+aktywnej i sprzedanej, a dla usuniętej 404/104. Dlatego `resolve_item`:
+  1. /services 404/104                      → deleted (1 zapytanie, ~1 KB),
+  2. /services 200 → sidebar 404/104        → sold (oferta istnieje, ale sidebar jej już nie pokazuje),
+  3. /services 200 → sidebar 200            → jak dawniej: sold (item_closing_action) / reserved / hidden / unlisted,
+     a gdy oferta jest jeszcze w katalogu (missed_runs = 0) → active.
+/services daje też cenę w zł i w walucie sprzedawcy w chwili sprawdzenia (cena sprzedaży bez kursowego dryfu).
+
 Aktywna, a niewidoczna w katalogu → stan `unlisted` (sprawdzamy ponownie po ANALYZER_RECHECK_DAYS), chyba że jej
 cena spadła poniżej ANALYZER_PRICE_MIN → `below_min` (poza zakresem, nie śledzimy).
 
@@ -28,6 +37,12 @@ from .probe import redact
 log = logging.getLogger("analyzer.resolver")
 
 DELETED_CODE = 104
+# Adres z ruchu przeglądarki użytkownika (2026-10-24, strona sprzedanej oferty).
+SERVICES_URL = "https://www.vinted.pl/api/v2/items/{item_id}/services"
+
+
+def is_not_found(status_code, body):
+    return status_code == 404 and isinstance(body, dict) and body.get("code") == DELETED_CODE
 
 
 def classify(status_code, body):
@@ -57,10 +72,9 @@ def classify(status_code, body):
     return "unlisted", "aktywna, brak w katalogu"
 
 
-async def fetch_sidebar(session, item_id):
-    """GET details/sidebar bez raise_for_status (404 to tu normalna odpowiedź). 401/403 → odświeżenie sesji."""
-    url = SIDEBAR_URL.format(item_id=item_id)
-    headers = {"referer": f"https://www.vinted.pl/items/{item_id}"}
+async def _get(session, url, referer):
+    """GET bez raise_for_status (404 to tu normalna odpowiedź). 401/403 → odświeżenie sesji, 429 → RateLimited."""
+    headers = {"referer": referer}
     for attempt in range(2):
         response = await session.client.get(url, headers=headers)
         session.traffic.add_http("details", response)
@@ -76,6 +90,50 @@ async def fetch_sidebar(session, item_id):
     return response.status_code, {}
 
 
+async def fetch_sidebar(session, item_id):
+    return await _get(session, SIDEBAR_URL.format(item_id=item_id), f"https://www.vinted.pl/items/{item_id}")
+
+
+async def fetch_services(session, item_id):
+    return await _get(session, SERVICES_URL.format(item_id=item_id), f"https://www.vinted.pl/items/{item_id}")
+
+
+class Resolution:
+    """Wynik sprawdzenia jednej oferty: stan (None = nie wiadomo), powód i surowe odpowiedzi."""
+
+    def __init__(self, state, reason, sidebar=None, services=None):
+        self.state, self.reason = state, reason
+        self.sidebar = sidebar        # (status, body) albo None, gdy nie pytaliśmy
+        self.services = services
+
+
+def judge(sidebar, services):
+    """Stan z pary odpowiedzi (sidebar, /services) - każda (status, body) albo None."""
+    if services is not None:
+        status, body = services
+        if is_not_found(status, body):
+            return "deleted", "services 404/104"
+        if status != 200:
+            return None, f"services HTTP {status}"
+    if sidebar is None:
+        return None, "brak odpowiedzi sidebar"
+    status, body = sidebar
+    if is_not_found(status, body):
+        if services is None:
+            return None, "sidebar 404/104 - bez /services nie wiadomo: sprzedana czy usunięta"
+        return "sold", "sidebar 404/104 + services 200"
+    return classify(status, body)
+
+
+async def resolve_item(session, item_id, sidebar=None):
+    """Najpierw /services (usunięta = 1 zapytanie), potem sidebar - chyba że sidebar już mamy (details)."""
+    services = await fetch_services(session, item_id)
+    if sidebar is None and not is_not_found(*services) and services[0] == 200:
+        sidebar = await fetch_sidebar(session, item_id)
+    state, reason = judge(sidebar, services)
+    return Resolution(state, reason, sidebar, services)
+
+
 def _days(start, end):
     try:
         a, b = datetime.fromisoformat(start), datetime.fromisoformat(end)
@@ -84,16 +142,37 @@ def _days(start, end):
     return round((b - a).total_seconds() / 86400, 2)
 
 
-def apply_result(conn, row, state, status_code, body, now):
-    db.put_raw(conn, row["id"], "resolve", {"_status": status_code, "body": redact(body)}, now)
+def _money(obj):
+    if isinstance(obj, dict):
+        return to_float(obj.get("amount")), obj.get("currency_code")
+    return None, None
+
+
+def apply_result(conn, row, state, status_code, body, now, services=None):
+    """Zapisuje wynik sprawdzenia. status_code/body - odpowiedź sidebar (albo None), services - (status, body)."""
+    if status_code is not None:
+        db.put_raw(conn, row["id"], "resolve", {"_status": status_code, "body": redact(body)}, now)
+    seller_price = seller_currency = services_price = None
+    if services is not None:
+        s_status, s_body = services
+        db.put_raw(conn, row["id"], "services", {"_status": s_status, "body": s_body}, now)
+        if s_status == 200 and isinstance(s_body, dict):
+            services_price, _ = _money(s_body.get("original_asking_amount"))
+            seller_price, seller_currency = _money(s_body.get("seller_original_asking_amount"))
+        conn.execute("UPDATE listings SET services_at=?, seller_price=COALESCE(?, seller_price), "
+                     "seller_currency=COALESCE(?, seller_currency) WHERE id=?",
+                     (now, seller_price, seller_currency, row["id"]))
     if state is None:
         return
     if status_code == 200 and row["details_at"] is None and isinstance(body, dict):
         from .details import store_details   # sprzedana bez szczegółów - opis jest w tej samej odpowiedzi
         store_details(conn, row["id"], body, now)
+    if state == "unlisted" and row["missed_runs"] == 0:
+        state = "active"                     # wciąż w katalogu (ostatnie przejście ją widziało)
     if state == "sold":
-        sidebar = unwrap_sidebar(body)
-        price = to_float(sidebar.get("price"))
+        price = services_price
+        if price is None and status_code == 200:
+            price = to_float(unwrap_sidebar(body).get("price"))
         if price is None:
             price = row["price_now"]
             if price is None:
@@ -116,32 +195,79 @@ def candidates(conn, recheck_days, limit=None):
     return rows
 
 
-async def resolve(cfg, session, conn, limit=None, sleep=asyncio.sleep):
-    rows = candidates(conn, cfg.recheck_days, limit)
+def _below_min(cfg, row, res):
+    """Aktywna, ale niewidoczna w katalogu, bo potaniała poniżej progu kategorii → below_min."""
+    state, reason = res.state, res.reason
+    low = cfg.category_min(row["category"]) if row["category"] else cfg.price_min_for(row["catalog_id"])
+    if state == "unlisted" and low and res.sidebar and res.sidebar[0] == 200:
+        price = to_float(unwrap_sidebar(res.sidebar[1]).get("price"))
+        if price is not None and price < low:
+            return "below_min", f"cena {price:g} zł < {low:g} zł"
+    return state, reason
+
+
+async def _run(cfg, session, conn, rows, tag, sleep=asyncio.sleep, verbose=True):
+    """Sprawdza oferty po kolei (resolve_item) i zapisuje wyniki. Zwraca {stan: liczba}."""
+    import time
+
     counts = {}
-    log.info("[RESOLVE] Do sprawdzenia: %d ofert.", len(rows))
+    started = time.monotonic()
     for n, row in enumerate(rows):
         if n:
             await sleep(cfg.pick_delay())
         try:
-            status_code, body = await fetch_sidebar(session, row["id"])
+            res = await resolve_item(session, row["id"])
         except RateLimited:
-            log.warning("[RESOLVE] 429 - przerywam, reszta przy następnym uruchomieniu.")
+            log.warning("[%s] 429 - przerywam, reszta przy następnym uruchomieniu.", tag)
             break
         except Exception as exc:  # sieć / proxy - ta oferta poczeka do następnego razu
-            log.warning("[RESOLVE] %s: błąd %r", row["id"], exc)
+            log.warning("[%s] %s: błąd %r", tag, row["id"], exc)
             counts["błąd"] = counts.get("błąd", 0) + 1
             continue
-        state, reason = classify(status_code, body)
-        low = cfg.category_min(row["category"]) if row["category"] else cfg.price_min_for(row["catalog_id"])
-        if state == "unlisted" and low:
-            price = to_float(unwrap_sidebar(body).get("price"))
-            if price is not None and price < low:   # zniknęła z naszego zakresu, bo potaniała
-                state, reason = "below_min", f"cena {price:g} zł < {low:g} zł"
+        state, reason = _below_min(cfg, row, res)
+        status_code, body = res.sidebar if res.sidebar else (None, None)
         with conn:
-            apply_result(conn, row, state, status_code, body, db.utcnow())
+            apply_result(conn, row, state, status_code, body, db.utcnow(), res.services)
+        if state == "unlisted" and row["missed_runs"] == 0:
+            state = "active"
         key = state or "nieznany"
         counts[key] = counts.get(key, 0) + 1
-        log.info("[RESOLVE] %s %s -> %s (%s)", row["id"], (row["title"] or "")[:40], key, reason)
-    log.info("[RESOLVE] Wynik: %s", ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "nic do zrobienia")
+        if verbose:
+            log.info("[%s] %s %s -> %s (%s)", tag, row["id"], (row["title"] or "")[:40], key, reason)
+        elif (n + 1) % 50 == 0 or n + 1 == len(rows):
+            per = (time.monotonic() - started) / (n + 1)
+            log.info("[%s] %d/%d (zostało ~%.1f h): %s", tag, n + 1, len(rows), per * (len(rows) - n - 1) / 3600,
+                     ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+    log.info("[%s] Wynik: %s", tag, ", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "nic do zrobienia")
     return counts
+
+
+async def resolve(cfg, session, conn, limit=None, sleep=asyncio.sleep):
+    rows = candidates(conn, cfg.recheck_days, limit)
+    log.info("[RESOLVE] Do sprawdzenia: %d ofert.", len(rows))
+    return await _run(cfg, session, conn, rows, "RESOLVE", sleep)
+
+
+RECHECK_STATES = ("deleted",)
+
+
+def recheck_candidates(conn, states=RECHECK_STATES, limit=None, again=False):
+    """Oferty w podanych stanach, jeszcze niesprawdzone przez /services (again=True - wszystkie), najświeższe
+    zniknięcia najpierw (ich strony Vinted na pewno jeszcze ma)."""
+    marks = ",".join("?" * len(states))
+    sql = (f"SELECT * FROM listings WHERE state IN ({marks})" + ("" if again else " AND services_at IS NULL")
+           + " ORDER BY last_seen DESC")
+    params = list(states)
+    if limit:
+        sql += " LIMIT ?"
+        params.append(int(limit))
+    return conn.execute(sql, params).fetchall()
+
+
+async def recheck(cfg, session, conn, states=RECHECK_STATES, limit=None, again=False, sleep=asyncio.sleep):
+    """Jednorazowa naprawa (2026-10-24): oferty oznaczone dawną metodą (`deleted` = sprzedane + usunięte + aktywne)
+    sprawdzane od nowa: /services → (sidebar) → deleted / sold / active / unlisted / hidden / reserved.
+    Można przerwać i wznowić - pomija już sprawdzone (services_at)."""
+    rows = recheck_candidates(conn, states, limit, again)
+    log.info("[RECHECK] Do sprawdzenia: %d ofert (stany: %s).", len(rows), ", ".join(states))
+    return await _run(cfg, session, conn, rows, "RECHECK", sleep, verbose=False)

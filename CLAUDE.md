@@ -232,6 +232,18 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   "message_code":"not_found"}`** (jak sidebar usuniętej). ⚠ Jeszcze potrzebne: `/services` i sidebar dla ukrytej i zarezerwowanej (czy sidebar dla nich też daje 404 –
   wtedy pomyliłyby się ze sprzedanymi), oraz walidacja na próbce: kilkadziesiąt ofert sprawdzonych parą zapytań
   i stroną HTML (`buyer_item_status`) – zgodność > ~98%, inaczej status ze strony HTML.
+* **Naprawa rozpoznawania sprzedaży (2026-10-24, zrobione, test na atrapie z prawdziwymi odpowiedziami)**:
+  `resolver.resolve_item`: najpierw `/services` (404/104 → `deleted`, 1 zapytanie), potem sidebar (404/104 →
+  `sold`, 200 → jak dawniej; `unlisted` przy `missed_runs = 0` → `active`). Używają tego resolve (watch), details
+  (sidebar 404 → `/services`), check i nowe **`python -m analyzer recheck [--states deleted] [--limit N] [--delay 2-4]
+  [--again]`** – jednorazowa naprawa starych `deleted` (najświeższe zniknięcia najpierw, wznawialne po
+  `services_at`). Migracja v9: `listings.services_at`, `seller_price`, `seller_currency` (z `/services`);
+  `sold_price` = `original_asking_amount` z `/services`. Surowe `/services` w `raw` (kind `services`). **Błąd A
+  naprawiony**: `deleted`/`sold`/`closed` w `REVIVABLE` – oferta znów w katalogu wraca do `active` (sold_price
+  kasowany, log `[DB] … znów w katalogu`). Użytkownik: rezerwacje na Vinted przestały działać.
+  Następny krok (decyzja użytkownika 2026-10-24): **opisy sprzedanych bez details ze strony HTML** – wyrenderowany
+  `<aside id="sidebar">` (status, atrybuty, `itemprop="description"`, „Dodane”) kończy się ~320–345 KB strony
+  (gzip ~33–37 KB) → pobieranie strumieniowe przerwane na `</aside>`.
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze

@@ -3,11 +3,14 @@
 Zasada „brak danych jest jawny”: NULL = katalog/szczegóły nie podały wartości (albo jeszcze nie sprawdzaliśmy).
 Czas zawsze UTC ISO 8601 (tekst), ceny w zł (REAL).
 """
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import rawstore
+
+log = logging.getLogger("analyzer.db")
 
 SCHEMA_V1 = """
 CREATE TABLE listings (
@@ -163,7 +166,15 @@ ALTER TABLE listings ADD COLUMN category_check TEXT;
 CREATE INDEX listings_check ON listings(category_check);
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8]
+# v9 (2026-10-24): sprzedaną od usuniętej rozróżnia /services (resolver.resolve_item); zapisujemy kiedy sprawdzono
+# i cenę w walucie sprzedawcy z /services (cena sprzedaży bez dryfu kursu).
+SCHEMA_V9 = """
+ALTER TABLE listings ADD COLUMN services_at TEXT;
+ALTER TABLE listings ADD COLUMN seller_price REAL;
+ALTER TABLE listings ADD COLUMN seller_currency TEXT;
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9]
 
 
 def utcnow():
@@ -240,8 +251,11 @@ def real_change(last, obs, seller_currency=None):
         return True
     return abs(new - old) / old * 100 >= FX_DRIFT_PCT
 # Stany, z których oferta wraca do active/reserved (albo przechodzi w inny stan wynikający z klasyfikacji / progu ceny),
-# gdy znów pojawi się w katalogu. sold / deleted / closed zostają.
-REVIVABLE = {"active", "reserved", "gone_pending", "hidden", "unlisted", "below_min", "ignored", "unclassified"}
+# gdy znów pojawi się w katalogu. Od 2026-10-24 także deleted / sold / closed: obecność w katalogu jest pewniejsza niż
+# odpowiedź sprawdzenia (aktywny MacBook 10292094832 był 12 dni „deleted”, a cały czas w katalogu).
+REVIVABLE = {"active", "reserved", "gone_pending", "hidden", "unlisted", "below_min", "ignored", "unclassified",
+             "deleted", "sold", "closed"}
+GONE_STATES = ("deleted", "sold", "closed")
 KEEP_CATEGORY_SRC = ("ai", "manual")   # decyzji AI / ręcznych nie nadpisują reguły przy kolejnych przejściach
 
 
@@ -294,6 +308,11 @@ def upsert_item(conn, item, run_id, seen_at, min_for=None):
         return "new"
 
     new_state = state if row["state"] in REVIVABLE else row["state"]
+    if row["state"] in GONE_STATES and new_state not in GONE_STATES:
+        # „zniknięta” znów w katalogu - błędne zniknięcie: kasujemy dane sprzedaży, zostaje ślad w logu
+        log.info("[DB] %s (%s) znów w katalogu - był stan %s, teraz %s.", item.id, (item.title or "")[:40],
+                 row["state"], new_state)
+        conn.execute("UPDATE listings SET sold_price=NULL, days_to_sell=NULL WHERE id=?", (item.id,))
     # Dane „stałe” uzupełniamy (COALESCE) - brak w nowej odpowiedzi nie kasuje tego, co już wiemy.
     conn.execute(
         """UPDATE listings SET last_seen=?, last_run_id=?, missed_runs=0,

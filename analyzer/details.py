@@ -19,7 +19,7 @@ from sniper.session import RateLimited
 
 from . import db
 from .probe import redact
-from .resolver import apply_result, classify, fetch_sidebar
+from .resolver import apply_result, fetch_services, fetch_sidebar, is_not_found, judge
 
 log = logging.getLogger("analyzer.details")
 
@@ -124,11 +124,18 @@ async def fetch_details(cfg, session, conn, limit=None, deadline=None, sleep=asy
             log.warning("[DETAILS] %s: błąd %r", row["id"], exc)
             counts["błąd"] = counts.get("błąd", 0) + 1
             continue
-        state, _ = classify(status_code, body)
+        services = None
+        if is_not_found(status_code, body):
+            # Od 2026-10-24 sidebar sprzedanej = 404/104, jak usuniętej - rozstrzyga /services (~1 KB).
+            try:
+                services = await fetch_services(session, row["id"])
+            except Exception as exc:
+                log.warning("[DETAILS] %s: /services błąd %r", row["id"], exc)
+        state, _ = judge((status_code, body), services)
         now = db.utcnow()
         with conn:
             if state in ("sold", "deleted", "closed", "hidden", "reserved"):
-                apply_result(conn, row, state, status_code, body, now)   # zapisuje też szczegóły (200)
+                apply_result(conn, row, state, status_code, body, now, services)   # zapisuje też szczegóły (200)
                 key = state
             elif status_code == 200 and isinstance(body, dict) and body.get("code", 0) == 0:
                 store_details(conn, row["id"], body, now)

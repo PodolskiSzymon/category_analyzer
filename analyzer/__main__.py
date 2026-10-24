@@ -8,7 +8,8 @@
   resolve [--limit N]                     zniknięte z katalogu -> sold / deleted / unlisted (1 zapytanie/ofertę)
   classify-report / reclassify            klasyfikacja ofert z kategorii mieszanych (bez sieci)
   classify-ai [--limit N]                 RAM + inna kategoria w tytule -> AI ocenia zdjęcie główne (bez proxy)
-  check <link|ID> [...]                   czy oferta jest sprzedana (1 zapytanie przez proxy) + co wie baza
+  recheck [--states deleted] [--limit N]  naprawa: 'deleted' od nowa przez /services + sidebar (sold/deleted/active)
+  check <link|ID> [...]                   czy oferta jest sprzedana (/services + sidebar przez proxy) + co wie baza
   resolve-report                          dlaczego 0 sprzedanych: zapisane odpowiedzi resolvera + próbka do wysłania
   sample [--per-category N]               próbka ofert z opisami (bez danych sprzedawcy) -> data/sample_*.jsonl
   diag                                    zmiany cen i braki pokrycia w ostatnim przejściu (bez sieci)
@@ -119,6 +120,22 @@ async def cmd_classify_ai(cfg, limit, retry_failed):
                             "GROUP BY category_check").fetchall()
         print("Stan sprawdzania zdjęć: " + (", ".join(f"{r[0]} {r[1]}" for r in left) or "nic do sprawdzenia"))
     finally:
+        conn.close()
+
+
+async def cmd_recheck(cfg, states, limit, again):
+    from .resolver import recheck
+
+    conn = db.connect(cfg.db_path)
+    session = build_session()
+    try:
+        await recheck(cfg, session, conn, states, limit, again)
+        log.info("[TRANSFER] %s", session.traffic.window_report()[0])
+        for row in conn.execute("SELECT category, state, COUNT(*) AS n FROM listings WHERE services_at IS NOT NULL "
+                                "GROUP BY category, state ORDER BY category, n DESC"):
+            log.info("[RECHECK] sprawdzone przez /services: %-8s %-10s %d", row["category"], row["state"], row["n"])
+    finally:
+        await session.close()
         conn.close()
 
 
@@ -267,6 +284,14 @@ def main(argv=None):
     p_show.add_argument("folder", nargs="?", default=None, help="domyślnie najnowszy data/probe/*")
     sub.add_parser("status", help="podsumowanie bazy")
     sub.add_parser("diag", help="diagnostyka bazy (zmiany cen, braki pokrycia) - bez sieci")
+    p_recheck = sub.add_parser("recheck", help="naprawa stanów: oferty 'deleted' sprawdzone od nowa (/services + "
+                                                "sidebar) -> sold / deleted / active ...; można przerwać i wznowić")
+    p_recheck.add_argument("--states", default="deleted",
+                           help="stany do sprawdzenia, po przecinku (domyślnie deleted; np. deleted,unlisted,hidden)")
+    p_recheck.add_argument("--limit", type=int, default=None)
+    p_recheck.add_argument("--again", action="store_true", help="także oferty już sprawdzone przez /services")
+    p_recheck.add_argument("--delay", default=None, help="przerwa między ofertami w s, np. 2-4 (domyślnie jak "
+                                                         "ANALYZER_PAGE_DELAY_S, 2-6)")
     p_check = sub.add_parser("check", help="czy oferta jest sprzedana: link(i) albo ID - jedno zapytanie na ofertę")
     p_check.add_argument("items", nargs="+", help="link https://www.vinted.pl/items/... albo samo ID")
     sub.add_parser("resolve-report", help="diagnostyka rozpoznawania sprzedaży (zapisane odpowiedzi) - bez sieci")
@@ -313,6 +338,12 @@ def main(argv=None):
                                           or "brak"))
         print("\n".join(classify.report(conn)))
         conn.close()
+    elif args.command == "recheck":
+        states = tuple(x.strip() for x in args.states.split(",") if x.strip())
+        if args.delay:
+            from .config import parse_range
+            cfg.page_delay = parse_range(args.delay, cfg.page_delay)
+        asyncio.run(cmd_recheck(cfg, states, args.limit, args.again))
     elif args.command == "check":
         asyncio.run(cmd_check(cfg, args.items))
     elif args.command == "resolve-report":

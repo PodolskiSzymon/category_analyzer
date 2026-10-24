@@ -3,8 +3,8 @@
 Dla każdej oferty:
   1. co wie baza: stan, pierwsze / ostatnie widzenie w katalogu, cena, ostatnia zapisana pozycja katalogu
      (pola, w których może być znacznik sprzedaży - item_box, badge, status…),
-  2. JEDNO zapytanie details/sidebar przez proxy (jak resolver) → jak program by ją sklasyfikował
-     (sold / deleted / closed / reserved / hidden / unlisted) i na podstawie jakich pól.
+  2. sprawdzenie jak w resolverze (resolver.resolve_item): /services, a gdy odpowie - sidebar → jak program by ją
+     sklasyfikował (sold / deleted / closed / reserved / hidden / unlisted) i na podstawie czego.
 Bazy NIE zmienia (tylko odczyt) - do sprawdzania, czy rozpoznawanie sprzedaży działa.
 """
 import json
@@ -12,7 +12,7 @@ import re
 
 from . import db
 from .resolve_diag import fingerprint
-from .resolver import classify, fetch_sidebar
+from .resolver import resolve_item
 
 _ID = re.compile(r"(?:items/)?(\d{6,})")
 SOLD_HINTS = re.compile(r"sold|sprzed|closed|zamkni|status|badge|reserved|rezerw", re.I)
@@ -70,12 +70,17 @@ async def check(session, conn, items):
         out.append(f"\n=== https://www.vinted.pl/items/{item_id}")
         if conn is not None:
             out += db_lines(conn, item_id)
-        status_code, body = await fetch_sidebar(session, item_id)
-        state, reason = classify(status_code, body)
-        out.append(f"  Vinted teraz (details/sidebar): HTTP {status_code} → program uznałby: "
-                   f"{(state or 'NIE WIADOMO').upper()} ({reason})")
-        fp = fingerprint({"_status": status_code, "body": body})
-        out.append("        " + ", ".join(f"{k}={v}" for k, v in fp.items() if k != "plugins"))
-        if fp.get("plugins"):
-            out.append(f"        pluginy: {fp['plugins']}")
+        res = await resolve_item(session, item_id)
+        out.append(f"  Vinted teraz: program uznałby: {(res.state or 'NIE WIADOMO').upper()} ({res.reason})")
+        s_status, s_body = res.services
+        if s_status == 200 and isinstance(s_body, dict):
+            asking = s_body.get("original_asking_amount") or {}
+            seller = s_body.get("seller_original_asking_amount") or {}
+            out.append(f"        /services: HTTP 200, cena {asking.get('amount')} {asking.get('currency_code')}"
+                       f" (sprzedawca: {seller.get('amount')} {seller.get('currency_code')})")
+        else:
+            out.append(f"        /services: HTTP {s_status} {json.dumps(s_body, ensure_ascii=False)[:120]}")
+        if res.sidebar is not None:
+            fp = fingerprint({"_status": res.sidebar[0], "body": res.sidebar[1]})
+            out.append("        sidebar: " + ", ".join(f"{k}={v}" for k, v in fp.items() if k != "plugins"))
     return out

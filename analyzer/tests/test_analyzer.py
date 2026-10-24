@@ -955,3 +955,123 @@ def test_check_command_on_real_responses():
     text = "\n".join(asyncio.run(check(Session(), conn, ["https://www.vinted.pl/items/9272936873", "10327664119"])))
     assert "program uznałby: SOLD" in text and "program uznałby: DELETED" in text
     assert "stan active" in text and "Sprzedane" in text
+
+
+# ------------------------------------------------------------------ /services: sprzedana vs usunięta (2026-10-24)
+
+# Prawdziwe odpowiedzi od użytkownika (2026-10-24): /services sprzedanej myszki 9011596531 i usuniętej oferty.
+SERVICES_SOLD = {
+    "services": {"buyer_protection": {"final_price": {"amount": "5.19", "currency_code": "PLN"}},
+                 "electronics_verification": None, "item_verification": None,
+                 "shipping": {"final_price": {"amount": "8.75", "currency_code": "PLN"},
+                              "seller_final_price": {"amount": "10.76", "currency_code": "RON"},
+                              "exchange_rate": "0.83245405", "pickup_only": False}},
+    "original_asking_amount": {"amount": "45.78", "currency_code": "PLN"},
+    "seller_original_asking_amount": {"amount": "55.0", "currency_code": "RON"},
+    "total_amount": {"amount": "50.97", "currency_code": "PLN"}}
+SERVICES_DELETED = {"code": 104, "message": "Zawartość nieodnaleziona", "message_code": "not_found"}
+
+
+def _vinted(routes):
+    """Atrapa Vinted: routes[(id, 'services'|'sidebar')] = (status, body)."""
+    def handler(request):
+        parts = request.url.path.split("/")
+        kind = "services" if parts[-1] == "services" else "sidebar"
+        status, body = routes[(int(parts[4]), kind)]
+        return httpx.Response(status, json=body)
+    return handler
+
+
+def test_judge_sold_deleted_active():
+    from analyzer.resolver import judge
+    active = SNIPER_FIXTURES["sidebar_active"]
+    assert judge((404, DELETED_BODY), (404, SERVICES_DELETED))[0] == "deleted"
+    assert judge(None, (404, SERVICES_DELETED))[0] == "deleted"
+    assert judge((404, DELETED_BODY), (200, SERVICES_SOLD))[0] == "sold"
+    assert judge((200, active), (200, SERVICES_SOLD))[0] == "unlisted"
+    assert judge((404, DELETED_BODY), None)[0] is None             # bez /services nie wiadomo
+    assert judge(None, (500, {}))[0] is None
+
+
+def test_recheck_fixes_old_deleted():
+    from analyzer.resolver import recheck
+
+    market = FakeMarket(market_prices(500, seed=21))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    sold_id, deleted_id, active_id, still_in_catalog = sorted(market.items)[:4]
+    for item_id in (sold_id, deleted_id, active_id):
+        del market.items[item_id]
+    crawl(make_cfg(), market, conn)
+    crawl(make_cfg(), market, conn)
+    with conn:   # stan jak u użytkownika: dawna metoda oznaczyła wszystko jako deleted
+        conn.execute("UPDATE listings SET state='deleted' WHERE id IN (?, ?, ?, ?)",
+                     (sold_id, deleted_id, active_id, still_in_catalog))
+    active = SNIPER_FIXTURES["sidebar_active"]
+    routes = {(sold_id, "services"): (200, SERVICES_SOLD), (sold_id, "sidebar"): (404, DELETED_BODY),
+              (deleted_id, "services"): (404, SERVICES_DELETED),
+              (active_id, "services"): (200, SERVICES_SOLD), (active_id, "sidebar"): (200, active),
+              (still_in_catalog, "services"): (200, SERVICES_SOLD), (still_in_catalog, "sidebar"): (200, active)}
+    requests = []
+
+    async def go():
+        session = await _mock_session(lambda r: requests.append(r.url.path) or _vinted(routes)(r))
+        try:
+            return await recheck(make_cfg(), session, conn, sleep=no_sleep)
+        finally:
+            await session.client.aclose()
+
+    counts = asyncio.run(go())
+    assert counts == {"sold": 1, "deleted": 1, "unlisted": 1, "active": 1}
+    rows = {r["id"]: r for r in conn.execute("SELECT * FROM listings")}
+    assert rows[sold_id]["state"] == "sold" and rows[sold_id]["sold_price"] == 45.78
+    assert (rows[sold_id]["seller_price"], rows[sold_id]["seller_currency"]) == (55.0, "RON")
+    assert rows[deleted_id]["state"] == "deleted"
+    assert rows[active_id]["state"] == "unlisted"           # aktywna, ale nie ma jej w katalogu
+    assert rows[still_in_catalog]["state"] == "active"      # w katalogu - fałszywe „deleted”
+    assert sum(1 for p in requests if p.endswith("/services")) == 4
+    assert not any(p.endswith(f"{deleted_id}/details/sidebar") for p in requests)   # usunięta = 1 zapytanie
+    assert db.get_raw(conn, sold_id, "services")[0][1]["_status"] == 200
+
+    # drugi raz nic do zrobienia (wznawianie), --again sprawdza ponownie
+    requests.clear()
+    assert asyncio.run(go()) == {}
+    assert requests == []
+
+
+def test_catalog_revives_false_deleted_and_sold():
+    market = FakeMarket(market_prices(300, seed=22))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    a, b = sorted(market.items)[:2]
+    with conn:
+        conn.execute("UPDATE listings SET state='deleted' WHERE id=?", (a,))
+        conn.execute("UPDATE listings SET state='sold', sold_price=1.0, days_to_sell=2 WHERE id=?", (b,))
+    crawl(make_cfg(), market, conn)             # obie dalej w katalogu
+    rows = {r["id"]: r for r in conn.execute("SELECT * FROM listings WHERE id IN (?, ?)", (a, b))}
+    assert rows[a]["state"] == "active" and rows[b]["state"] == "active"
+    assert rows[b]["sold_price"] is None and rows[b]["days_to_sell"] is None
+
+
+def test_details_404_resolved_by_services():
+    from analyzer.details import fetch_details
+
+    market = FakeMarket(market_prices(50, seed=23))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    ids = sorted(market.items, reverse=True)
+    active = SNIPER_FIXTURES["sidebar_active"]
+    routes = {(i, "sidebar"): (200, active) for i in ids}
+    routes[(ids[0], "sidebar")] = (404, DELETED_BODY)
+    routes[(ids[0], "services")] = (200, SERVICES_SOLD)
+    routes[(ids[1], "sidebar")] = (404, DELETED_BODY)
+    routes[(ids[1], "services")] = (404, SERVICES_DELETED)
+
+    async def go():
+        session = await _mock_session(_vinted(routes))
+        try:
+            return await fetch_details(make_cfg(), session, conn, limit=5, sleep=no_sleep)
+        finally:
+            await session.client.aclose()
+
+    counts = asyncio.run(go())
+    assert counts == {"sold": 1, "deleted": 1, "ok": 3}
+    assert conn.execute("SELECT state FROM listings WHERE id=?", (ids[0],)).fetchone()[0] == "sold"
+    assert conn.execute("SELECT state FROM listings WHERE id=?", (ids[1],)).fetchone()[0] == "deleted"
