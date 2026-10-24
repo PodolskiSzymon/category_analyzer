@@ -220,7 +220,7 @@ async def cmd_html_dump(cfg, items):
     import json as _json
 
     from .check import parse_id
-    from .html_details import fetch_sidebar_html, parse_sidebar_html
+    from .html_details import fetch_sidebar_html, parse_page
 
     session = build_session()
     try:
@@ -229,7 +229,7 @@ async def cmd_html_dump(cfg, items):
             status, html = await fetch_sidebar_html(session, item_id)
             path = Path(cfg.db_path).parent / f"html_dump_{item_id}.html"
             path.write_text(html, encoding="utf-8")
-            parsed = parse_sidebar_html(html) if html else None
+            parsed = parse_page(html) if html else None
             print(f"{item_id}: HTTP {status}, pobrano {len(html.encode()) / 1000:.0f} KB (po rozpakowaniu), "
                   f"panel boczny: {'jest' if '<aside id="sidebar"' in html else 'BRAK'} -> {path}")
             print("  parser: " + _json.dumps(parsed, ensure_ascii=False)[:600])

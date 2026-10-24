@@ -265,6 +265,10 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   3 z 5) → nowy stan **`blocked`** (html_details; nie liczy się do sprzedaży; w `REVIVABLE`/`GONE_STATES`).
   Poprawka: `traffic.request_bytes` nie wywraca się na zapytaniu po przekierowaniu (`/items/ID` → `/items/ID-slug`,
   httpx `RequestNotRead`).
+* **`html-details` – poprawka po `--dump` (2026-10-24)**: strona przychodzi strumieniowo, panel boczny na początku to
+  szkielet (`react-loading-skeleton`) – treść setki KB dalej. Pełny opis + tytuł są w `<head>` (`<meta name="description"
+  content="<tytuł> - <opis>">`, ~17 KB) → pobieranie do `</head>`; bez atrybutów i „Dodane”. 200 = istnieje, 404 =
+  `blocked`. Fixtures `head_sold_iphone`, `head_active_macbook`.
 * **Następne**: po `recheck` u użytkownika: `html-details` (opisy sprzedanych), `extract`, pierwszy raport; potem AI
   dla braków ekstrakcji i `report` (etap 4).
 

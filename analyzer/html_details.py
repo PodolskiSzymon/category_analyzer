@@ -1,4 +1,14 @@
-"""Szczegóły ofert ze STRONY oferty (HTML) - dla tych, których sidebar API już nie poda (sprzedane: 404/104 od
+"""Szczegóły ofert ze STRONY oferty (HTML)
+
+⚠ AKTUALIZACJA 2026-10-24 (pliki `--dump` od użytkownika): strona przychodzi STRUMIENIOWO (Next.js) - panel boczny
+na początku to tylko szkielet (`react-loading-skeleton`), prawdziwa treść (status „Sprzedane”, atrybuty, „Dodane”)
+dochodzi setki KB później. Natomiast **pełny opis i tytuł są w nagłówku** (`<meta name="description" content="<tytuł> -
+<opis>">`, `<title>`) w pierwszych ~17 KB → pobieramy tylko do `</head>` (kilka KB transferu). Stan: strona 200 =
+oferta istnieje (sprzedaż potwierdzona parą /services + sidebar), 404 = zdjęta (`blocked`). Bez atrybutów formularza
+i „Dodane” (byłoby to ~350 KB na ofertę). Parser panelu (niżej) zostaje - działa, gdy strona ma pełny panel (zapis
+z przeglądarki).
+
+Pierwotny opis: - dla tych, których sidebar API już nie poda (sprzedane: 404/104 od
 2026-10-24), a szczegółów nie zdążyliśmy pobrać, póki były aktywne.
 
 Strona `www.vinted.pl/items/{id}` waży ~1,9 MB (gzip ~365 KB), ale wyrenderowany panel boczny
@@ -33,8 +43,7 @@ from .resolver import _days
 log = logging.getLogger("analyzer.html")
 
 PAGE_URL = "https://www.vinted.pl/items/{item_id}"
-SIDEBAR_START = b'<aside id="sidebar"'
-STOP_MARKERS = (b'data-testid="item-shipping-banner"', b"</aside>")
+HEAD_END = b"</head>"         # opis i tytuł są w nagłówku - dalej nie czytamy
 MAX_BYTES = 800_000          # bezpiecznik: dalej nie czytamy, nawet jeśli nie znaleziono panelu
 # Zapytanie o stronę jak przy wejściu z linku w przeglądarce (dokument, nie API).
 PAGE_HEADERS = {
@@ -136,6 +145,35 @@ def _pln(text):
         return None
 
 
+_TITLE = re.compile(r"<title>(.*?)</title>", re.S)
+_META_DESC = re.compile(r'<meta name="description" content="(.*?)"\s*/?>', re.S)
+
+
+def parse_head(html):
+    """Nagłówek strony → {title, description, ...} (opis = meta description bez przedrostka „<tytuł> - ”)
+    albo None, gdy to nie strona oferty."""
+    title_m, desc_m = _TITLE.search(html or ""), _META_DESC.search(html or "")
+    if not title_m or not desc_m:
+        return None
+    title = unescape(title_m.group(1)).strip()
+    title = re.sub(r"\s*\|\s*Vinted\s*$", "", title)
+    desc = unescape(desc_m.group(1)).strip()
+    if desc.startswith(title + " - "):
+        desc = desc[len(title) + 3:]
+    elif desc == title:
+        desc = ""
+    return {"status": None, "sold": None, "title": title, "price": None, "attributes": {},
+            "description": desc.strip() or None}
+
+
+def parse_page(html):
+    """Pełny panel boczny, jeśli jest (zapis z przeglądarki), inaczej nagłówek (to, co pobiera program)."""
+    side = parse_sidebar_html(html)
+    if side and (side["title"] or side["description"]):
+        return side
+    return parse_head(html)
+
+
 def parse_sidebar_html(html):
     """Panel boczny strony oferty → {status, sold, title, price, attributes{kod: wartość}, description}
     albo None, gdy na stronie nie ma panelu (np. „Page not found”)."""
@@ -172,20 +210,14 @@ async def fetch_sidebar_html(session, item_id):
             if response.status_code == 429:
                 raise RateLimited(url)
             buf = bytearray()
-            sidebar_at, stop_at = -1, -1
             async for chunk in response.aiter_bytes():
                 buf += chunk
-                if sidebar_at < 0:
-                    sidebar_at = buf.find(SIDEBAR_START)
-                if sidebar_at >= 0:
-                    found = [i for i in (buf.find(m, sidebar_at) for m in STOP_MARKERS) if i >= 0]
-                    if found:
-                        stop_at = min(found)
-                        break
+                end = buf.find(HEAD_END)
+                if end >= 0:
+                    del buf[end + len(HEAD_END):]     # reszty strony (nazwa sprzedawcy itd.) nie zwracamy
+                    break
                 if len(buf) > MAX_BYTES:
                     break
-            if stop_at >= 0:
-                del buf[stop_at:]                 # dalej jest nazwa sprzedawcy - nie wychodzi poza tę funkcję
             return response.status_code, buf.decode("utf-8", errors="replace")
         finally:
             await response.aclose()
@@ -217,7 +249,9 @@ def store_html_details(conn, row, parsed, fetched_at):
 
 def candidates(conn, states=("sold",), limit=None):
     marks = ",".join("?" * len(states))
-    sql = (f"SELECT * FROM listings WHERE details_at IS NULL AND state IN ({marks}) "
+    # + oferty z pustymi szczegółami ze strony (pierwsza wersja czytała szkielet panelu - 2026-10-24)
+    sql = (f"SELECT * FROM listings WHERE (details_at IS NULL OR id IN (SELECT listing_id FROM details "
+           f"WHERE source='html' AND description IS NULL)) AND state IN ({marks}) "
            "AND category NOT IN ('ignored', 'unknown') ORDER BY last_seen DESC")
     params = list(states)
     if limit:
@@ -250,7 +284,7 @@ async def fetch_html_details(cfg, session, conn, states=("sold",), limit=None, s
             log.warning("[HTML] %s: błąd %r", row["id"], exc)
             counts["błąd"] = counts.get("błąd", 0) + 1
             continue
-        parsed = parse_sidebar_html(html) if status == 200 else None
+        parsed = parse_page(html) if status == 200 else None
         if parsed is None and status == 404 and row["state"] == "sold":
             # /services odpowiadał (stąd „sold”), ale strony nie ma: oferta zdjęta przez Vinted (np. konto
             # oszusta zablokowane) - to NIE jest sprzedaż.
@@ -264,7 +298,7 @@ async def fetch_html_details(cfg, session, conn, states=("sold",), limit=None, s
         else:
             with conn:
                 store_html_details(conn, row, parsed, db.utcnow())
-            key = "ok" + ("" if parsed["sold"] or row["state"] != "sold" else " (bez napisu Sprzedane!)")
+            key = "ok" + (" (bez napisu Sprzedane!)" if parsed["sold"] is False and row["state"] == "sold" else "")
         counts[key] = counts.get(key, 0) + 1
         state.update(n=n + 1, eta=(time.monotonic() - started) / (n + 1) * (len(rows) - n - 1))
         if progress:

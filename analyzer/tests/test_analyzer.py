@@ -1240,6 +1240,16 @@ def test_parse_sidebar_html_real_pages():
     assert parse_sidebar_html("<html><h1>Page not found</h1></html>") is None
 
 
+def test_parse_head_real_pages():
+    from analyzer.html_details import parse_page
+    sold = parse_page(HTML_FIXTURES["head_sold_iphone"])
+    assert sold["title"] == "Iphone 15 Pro" and sold["sold"] is None
+    assert sold["description"].startswith("Sprzedaż i wyłacznie przez Olx") and "Plecki i aparaty" in sold["description"]
+    mac = parse_page(HTML_FIXTURES["head_active_macbook"])
+    assert mac["title"].startswith("💻 MacBook Pro 13")
+    assert "Touch Bar & Touch ID" in mac["description"] and mac["description"].startswith("💻 MacBook Pro 13” 2019 – 2.399")
+
+
 def test_html_details_flow_stops_early_and_stores():
     from analyzer.html_details import fetch_html_details
 
@@ -1248,8 +1258,9 @@ def test_html_details_flow_stops_early_and_stores():
     sold_id, gone_id = sorted(market.items)[:2]
     with conn:
         conn.execute("UPDATE listings SET state='sold', created_at=NULL WHERE id IN (?, ?)", (sold_id, gone_id))
-    tail = 'data-testid="item-shipping-banner"><div data-testid="profile-username">sprzedawca_xyz</div>' + "x" * 500_000
-    page = "<html><head>" + "y" * 300_000 + "</head><body>" + HTML_FIXTURES["sold_mouse"] + tail
+    tail = '<body><aside id="sidebar"><span class="react-loading-skeleton"></span></aside>' \
+        '<div data-testid="profile-username">sprzedawca_xyz</div>' + "x" * 500_000
+    page = HTML_FIXTURES["head_sold_iphone"] + tail          # jak u Vinted: nagłówek z opisem, potem szkielet
     requested = []
 
     def handler(request):
@@ -1272,9 +1283,10 @@ def test_html_details_flow_stops_early_and_stores():
     gone = conn.execute("SELECT state, sold_price FROM listings WHERE id=?", (gone_id,)).fetchone()
     assert tuple(gone) == ("blocked", None)                     # „sprzedana” bez strony = zdjęta przez Vinted
     d = conn.execute("SELECT * FROM details WHERE listing_id=?", (sold_id,)).fetchone()
-    assert d["source"] == "html" and d["upload_age"] == "4 mies." and "Tested and working" in d["description"]
+    assert d["source"] == "html" and d["description"].startswith("Sprzedaż i wyłacznie przez Olx / Allegro")
+    assert "iCloud / Find My" in d["description"]
     row = conn.execute("SELECT * FROM listings WHERE id=?", (sold_id,)).fetchone()
-    assert row["details_at"] and row["created_at"] and row["days_to_sell"] is not None
+    assert row["details_at"] and row["days_to_sell"] is not None
     assert "sprzedawca_xyz" not in json.dumps([v for _, v in db.get_raw(conn, sold_id, "html_sidebar")])
     headers = requested[0].headers
     assert headers["accept"].startswith("text/html") and "x-next-app" not in headers
