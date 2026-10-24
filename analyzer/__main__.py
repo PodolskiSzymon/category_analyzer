@@ -9,6 +9,7 @@
   classify-report / reclassify            klasyfikacja ofert z kategorii mieszanych (bez sieci)
   classify-ai [--limit N]                 RAM + inna kategoria w tytule -> AI ocenia zdjęcie główne (bez proxy)
   recheck [--states deleted] [--limit N]  naprawa: 'deleted' od nowa przez /services + sidebar (sold/deleted/active)
+  ntfy-test                               testowe powiadomienie na telefon (ntfy)
   check <link|ID> [...]                   czy oferta jest sprzedana (/services + sidebar przez proxy) + co wie baza
   resolve-report                          dlaczego 0 sprzedanych: zapisane odpowiedzi resolvera + próbka do wysłania
   sample [--per-category N]               próbka ofert z opisami (bez danych sprzedawcy) -> data/sample_*.jsonl
@@ -142,9 +143,12 @@ def recheck_links(conn, since, show=("sold", "hidden"), per_state=50):
 
 
 async def cmd_recheck(cfg, states, limit, again, human=False, delay=(0.6, 1.5), show=("sold", "hidden")):
+    import time
+
+    from . import notify
     from .pacing import HumanPacer
     from .progress import ConsoleBar
-    from .resolver import recheck
+    from .resolver import recheck, recheck_candidates
 
     bar = ConsoleBar()
     console = [h for h in logging.getLogger().handlers if type(h) is logging.StreamHandler]
@@ -158,13 +162,27 @@ async def cmd_recheck(cfg, states, limit, again, human=False, delay=(0.6, 1.5), 
     conn = db.connect(cfg.db_path)
     session = build_session()
     since = db.utcnow()
+    started = time.monotonic()
     try:
-        await recheck(cfg, session, conn, states, limit, again, pacer=pacer, progress=bar)
+        try:
+            counts = await recheck(cfg, session, conn, states, limit, again, pacer=pacer, progress=bar)
+        except Exception as exc:
+            bar.finish()
+            await notify.send("Analyzer: recheck przerwany błędem", [repr(exc)[:300]], priority=4, tags=("warning",))
+            raise
         bar.finish()
         links = recheck_links(conn, since, show)
         if links:
             print("\nDo sprawdzenia w przeglądarce (wyniki tego uruchomienia):\n" + "\n".join(links) + "\n", flush=True)
-        log.info("[TRANSFER] %s", session.traffic.window_report()[0])
+        transfer = session.traffic.window_report()[0]
+        log.info("[TRANSFER] %s", transfer)
+        left = len(recheck_candidates(conn, states))
+        hours = (time.monotonic() - started) / 3600
+        await notify.send(
+            f"Analyzer: recheck {'skończony' if not left else 'zatrzymany'} ({sum(counts.values())} ofert, "
+            f"{hours:.1f} h)",
+            [", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "nic do zrobienia",
+             f"zostało do sprawdzenia: {left}", transfer.split("|")[0].strip()])
         for row in conn.execute("SELECT category, state, COUNT(*) AS n FROM listings WHERE services_at IS NOT NULL "
                                 "GROUP BY category, state ORDER BY category, n DESC"):
             log.info("[RECHECK] sprawdzone przez /services: %-8s %-10s %d", row["category"], row["state"], row["n"])
@@ -336,6 +354,7 @@ def main(argv=None):
                            help="bez sprawdzania - tylko linki z dotychczasowych wyników recheck (--show)")
     p_recheck.add_argument("--pauses", action="store_true",
                            help="„ludzkie” przerwy: co ~pół godziny 10-120 s i 8 h odpoczynku po 12 h (domyślnie bez)")
+    sub.add_parser("ntfy-test", help="testowe powiadomienie na telefon (temat z ANALYZER_NTFY_TOPIC / SNIPER_NTFY_TOPIC)")
     p_check = sub.add_parser("check", help="czy oferta jest sprzedana: link(i) albo ID - jedno zapytanie na ofertę")
     p_check.add_argument("items", nargs="+", help="link https://www.vinted.pl/items/... albo samo ID")
     sub.add_parser("resolve-report", help="diagnostyka rozpoznawania sprzedaży (zapisane odpowiedzi) - bez sieci")
@@ -393,6 +412,11 @@ def main(argv=None):
             conn.close()
             return
         asyncio.run(cmd_recheck(cfg, states, args.limit, args.again, human=args.pauses, delay=delay, show=show))
+    elif args.command == "ntfy-test":
+        from . import notify
+        ok = asyncio.run(notify.send("Analyzer: test powiadomienia", ["Tak będzie wyglądać powiadomienie o końcu "
+                                                                     "pracy recheck."]))
+        print("Wysłano - sprawdź telefon." if ok else "Nie wysłano - patrz komunikat wyżej.")
     elif args.command == "check":
         asyncio.run(cmd_check(cfg, args.items))
     elif args.command == "resolve-report":

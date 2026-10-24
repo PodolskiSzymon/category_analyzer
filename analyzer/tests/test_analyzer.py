@@ -1193,3 +1193,29 @@ def test_recheck_waits_on_429_and_retries():
     hits["n"] = 1                                                 # pierwsze zapytanie dostanie 429
     assert asyncio.run(go(resolve)) == {}
     assert conn.execute("SELECT COUNT(*) FROM listings WHERE state='gone_pending'").fetchone()[0] == 3
+
+
+def test_ntfy_notification(monkeypatch):
+    from analyzer import notify
+    sent = []
+
+    def handler(request):
+        sent.append((str(request.url), json.loads(request.content)))
+        return httpx.Response(200, json={})
+
+    async def go():
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            return await notify.send("Analyzer: recheck skończony", ["sold 5, deleted 10"], client=client)
+        finally:
+            await client.aclose()
+
+    monkeypatch.delenv("ANALYZER_NTFY_TOPIC", raising=False)
+    monkeypatch.delenv("SNIPER_NTFY_TOPIC", raising=False)
+    assert asyncio.run(go()) is False and sent == []          # bez tematu - nic nie wysyła
+    monkeypatch.setenv("ANALYZER_NTFY_TOPIC", "test-temat")
+    monkeypatch.setenv("SNIPER_NTFY_SERVER", "https://ntfy.example")
+    assert asyncio.run(go()) is True
+    url, body = sent[0]
+    assert url.startswith("https://ntfy.example") and body["topic"] == "test-temat"
+    assert body["title"] == "Analyzer: recheck skończony" and "sold 5" in body["message"]
