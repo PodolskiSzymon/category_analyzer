@@ -244,7 +244,21 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   Następny krok (decyzja użytkownika 2026-10-24): **opisy sprzedanych bez details ze strony HTML** – wyrenderowany
   `<aside id="sidebar">` (status, atrybuty, `itemprop="description"`, „Dodane”) kończy się ~320–345 KB strony
   (gzip ~33–37 KB) → pobieranie strumieniowe przerwane na `</aside>`.
-* **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
+* **`html-details` (2026-10-24, zrobione, test na stronach zapisanych przez użytkownika)**: `analyzer/html_details.py`
+  – sprzedane bez szczegółów: strona oferty strumieniowo, przerwane na `data-testid="item-shipping-banner"` (za nim
+  nazwa sprzedawcy – nie czytamy), parser panelu (`status` „Sprzedane”, cena, `item-attributes-<kod>` → te same kody
+  co atrybuty API, `itemprop="description"`, „Dodane”) → `details` (`source='html'`, migracja v10), czas sprzedaży
+  przeliczany z „Dodane”. Nagłówki jak nawigacja przeglądarki (bez `x-next-app` itd.) – ⚠ do potwierdzenia na żywo
+  (`html-details --limit 5`). Fixture: `analyzer/tests/fixtures_html.json` (fragment panelu, bez danych sprzedawcy).
+* **`extract.py` v1 (2026-10-24, reguły, bez AI)**: tabela `features` (migracja v11: kolumny model, cpu, cpu_line, gpu,
+  ram_gb, storage_gb, screen_in, refresh_hz, battery_pct, condition_grade, for_parts, locked, cracked, segment +
+  `fields_json` z źródłami + `config_key`). Źródła: atrybuty formularza > tytuł > opis; pomyłki formularza (RAM
+  „256 GB”, dysk „8 GB”) → `platform_field_errors`. Słowa usterek/blokad/baterii w ~10 językach. Na próbce 1050
+  ofert klucz konfiguracji: laptopy 96%, telefony 94%, RAM 97%, dyski 88%, GPU 79%, tablety 75%, konsole 100%
+  (platforma). `python -m analyzer extract [--again]`, `extract-report` (pokrycie pól + konfiguracje z medianą ceny
+  i ceny sprzedaży); w `watch` przyrostowo po resolve. AI dla braków – później (po pierwszym raporcie).
+* **Następne**: po `recheck` u użytkownika: `html-details` (opisy sprzedanych), `extract`, pierwszy raport; potem AI
+  dla braków ekstrakcji i `report` (etap 4).
 
 ## Obserwacja: oferty z innych rynków Vinted (użytkownik, 2026-10-11) – do wykorzystania w Sniperze
 
@@ -303,7 +317,10 @@ python -m pytest analyzer/tests sniper/tests    # testy bez sieci
 python -m analyzer resolve [--limit N]          # zniknięte z katalogu -> sold / deleted / unlisted
 python -m analyzer details [--limit N]          # opis + atrybuty raz na ofertę
 python -m analyzer watch                        # bez końca: crawl wszystkich kategorii + resolve, między przejściami details
-# jeszcze nie istnieją: extract (etap 3), report (etap 4)
+python -m analyzer recheck                      # naprawa starych 'deleted' (/services + sidebar), ntfy na koniec
+python -m analyzer html-details                 # opisy sprzedanych ze strony HTML (~35 KB/ofertę)
+python -m analyzer extract && python -m analyzer extract-report   # parametry regułami + konfiguracje z cenami
+# jeszcze nie istnieje: report (etap 4)
 ```
 
 ## Moduły Snipera do ponownego użycia (bez zmian w ich zachowaniu)

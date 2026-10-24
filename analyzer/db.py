@@ -181,8 +181,25 @@ ALTER TABLE details ADD COLUMN source TEXT;
 UPDATE details SET source = 'sidebar';
 """
 
+# v11 (2026-10-24): parametry z ekstrakcji regułami (extract.py) - kolumny do prostego SQL + wszystko z źródłami
+# w fields_json + config_key (klucz grupowania cen). Stara tabela `specs` (v1) zostaje nieużywana.
+SCHEMA_V11 = """
+CREATE TABLE features (
+  listing_id      INTEGER PRIMARY KEY,
+  category        TEXT,
+  version         INTEGER NOT NULL,
+  extracted_at    TEXT NOT NULL,
+  fields_json     TEXT NOT NULL,
+  config_key      TEXT,
+  model TEXT, cpu TEXT, cpu_line TEXT, gpu TEXT, ram_gb INTEGER, storage_gb INTEGER, screen_in REAL,
+  refresh_hz INTEGER, battery_pct INTEGER, condition_grade TEXT, for_parts INTEGER, locked INTEGER, cracked INTEGER,
+  segment TEXT
+);
+CREATE INDEX features_key ON features(category, config_key);
+"""
+
 MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9,
-              SCHEMA_V10]
+              SCHEMA_V10, SCHEMA_V11]
 
 
 def utcnow():

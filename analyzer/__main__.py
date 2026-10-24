@@ -10,6 +10,7 @@
   classify-ai [--limit N]                 RAM + inna kategoria w tytule -> AI ocenia zdjęcie główne (bez proxy)
   recheck [--states deleted] [--limit N]  naprawa: 'deleted' od nowa przez /services + sidebar (sold/deleted/active)
   html-details [--states sold] [--limit N] opisy sprzedanych ze strony HTML (gdy API ich już nie poda)
+  extract [--again] / extract-report      parametry ofert regułami + pokrycie i konfiguracje z cenami (bez sieci)
   ntfy-test                               testowe powiadomienie na telefon (ntfy)
   check <link|ID> [...]                   czy oferta jest sprzedana (/services + sidebar przez proxy) + co wie baza
   resolve-report                          dlaczego 0 sprzedanych: zapisane odpowiedzi resolvera + próbka do wysłania
@@ -81,6 +82,11 @@ async def cmd_watch(cfg, catalogs, resolve_limit, with_details=True):
                 await crawler.run(catalog_id)
             await run_ai_classify(cfg, conn)
             await resolve(cfg, session, conn, resolve_limit)
+            try:
+                from . import extract
+                log.info("[EXTRACT] Nowe / zmienione oferty: %d.", extract.run(conn))
+            except Exception:
+                log.exception("[EXTRACT] Błąd ekstrakcji - spróbuję w następnym cyklu.")
             for line in status_lines(conn):
                 log.info("[STATUS] %s", line)
             if with_details:
@@ -388,6 +394,10 @@ def main(argv=None):
     p_html.add_argument("--states", default="sold", help="stany ofert, po przecinku (domyślnie sold)")
     p_html.add_argument("--limit", type=int, default=None)
     p_html.add_argument("--delay", default="0.6-1.5", help="odstęp między ofertami w s (domyślnie 0.6-1.5)")
+    p_extract = sub.add_parser("extract", help="parametry ofert regułami (CPU, GPU, RAM, dysk, model, bateria, stan) - "
+                                               "bez sieci")
+    p_extract.add_argument("--again", action="store_true", help="wszystkie oferty od nowa")
+    sub.add_parser("extract-report", help="pokrycie pól i najczęstsze konfiguracje z cenami - bez sieci")
     sub.add_parser("ntfy-test", help="testowe powiadomienie na telefon (temat z ANALYZER_NTFY_TOPIC / SNIPER_NTFY_TOPIC)")
     p_check = sub.add_parser("check", help="czy oferta jest sprzedana: link(i) albo ID - jedno zapytanie na ofertę")
     p_check.add_argument("items", nargs="+", help="link https://www.vinted.pl/items/... albo samo ID")
@@ -450,6 +460,14 @@ def main(argv=None):
         from .config import parse_range
         states = tuple(x.strip() for x in args.states.split(",") if x.strip())
         asyncio.run(cmd_html_details(cfg, states, args.limit, parse_range(args.delay, (0.6, 1.5))))
+    elif args.command in ("extract", "extract-report"):
+        from . import extract
+        print(f"Otwieram bazę {cfg.db_path} ...", flush=True)
+        conn = db.connect(cfg.db_path)
+        if args.command == "extract":
+            extract.run(conn, args.again, progress=lambda t: print(t, flush=True))
+        print("\n".join(extract.report(conn)))
+        conn.close()
     elif args.command == "ntfy-test":
         from . import notify
         ok = asyncio.run(notify.send("Analyzer: test powiadomienia", ["Tak będzie wyglądać powiadomienie o końcu "

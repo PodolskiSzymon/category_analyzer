@@ -1275,3 +1275,64 @@ def test_html_details_flow_stops_early_and_stores():
     headers = requested[0].headers
     assert headers["accept"].startswith("text/html") and "x-next-app" not in headers
     assert requested[0].url.path == f"/items/{sold_id}"
+
+
+# ------------------------------------------------------------------ extract (reguły)
+
+@pytest.mark.parametrize("category,title,desc,attrs,expected", [
+    ("laptop", "Laptop Acer Nitro 5 i7-12650H RTX 4060 16GB DDR5", "Ssd M2 1 TB", {"model_nav": "Nitro 5"},
+     {"model": "nitro 5", "cpu": "i7-12650h", "gpu": "rtx 4060", "ram_gb": 16, "storage_gb": 1000}),
+    ("laptop", "DELL G15 I5-13450HX RTX 3050 6GB, 512GB nVMe, 16GB DDR5, 120Hz", "", {},
+     {"cpu": "i5-13450hx", "gpu": "rtx 3050", "ram_gb": 16, "storage_gb": 512, "refresh_hz": 120}),
+    ("laptop", "MacBook Air M3 SSD256, 8 GB RAM", "", {"computer_ram": "8 GB", "computer_storage_capacity": "256 GB"},
+     {"model": "macbook air", "cpu": "apple m3", "ram_gb": 8, "storage_gb": 256}),
+    ("laptop", "Dell Precision 7550", "RTX A2000 4GB, 15,6 cala, i7-10850H", {"computer_ram": "32 GB"},
+     {"gpu": "rtx a2000", "screen_in": 15.6, "cpu": "i7-10850h", "segment": "workstation"}),
+    ("phone", "iPhone 13 Pro Max 256GB", "bateria 87%, bez blokad", {"internal_memory_capacity": "256 GB",
+                                                                     "sim_lock": "Brak blokady"},
+     {"model": "iphone 13 pro max", "storage_gb": 256, "battery_pct": 87, "locked": False, "sim_lock": False}),
+    ("phone", "Iphone 11", "Face ID virker ikke. Skærmen er knust", {"internal_memory_capacity": "128 GB"},
+     {"model": "iphone 11", "storage_gb": 128, "cracked": True}),
+    ("phone", "iphone 12 mini", "akku kapasiteetti 73%", {}, {"model": "iphone 12 mini", "battery_pct": 73}),
+    ("phone", "Galaxy S23 Ultra", "na części, nie włącza się", {"internal_memory_capacity": "256 MB"},
+     {"model": "galaxy s23 ultra", "for_parts": True, "storage_gb": 256, "segment": "for_parts"}),
+    ("console", "Consolă PlayStation 4 (PS4) Slim 1TB + 2 pady", "", {"video_game_platform": "PlayStation 4"},
+     {"platform": "PlayStation 4", "variant": "slim", "storage_gb": 1000, "controllers": 2}),
+    ("gpu", "Evga RTX 2080 Ti 11GB", "", {}, {"gpu": "rtx 2080 ti", "vram_gb": 11}),
+    ("ram", "Kingston 16 GB DDR4 (2x8 GB), 2666MHz SO-DIMM", "", {},
+     {"ram_type": "ddr4", "form": "so-dimm", "total_gb": 16, "speed_mhz": 2666}),
+    ("storage", "Samsung 990 PRO 2TB NVMe M.2 2280", "", {}, {"storage_type": "nvme", "storage_gb": 2000, "form": "2280"}),
+])
+def test_extract_rules(category, title, desc, attrs, expected):
+    from analyzer.extract import extract
+    fields, _ = extract(category, title, desc, attrs)
+    got = {k: (fields.get(k) or {}).get("value") for k in expected}
+    assert got == expected
+
+
+def test_extract_run_and_report():
+    from analyzer import extract
+
+    market = FakeMarket(market_prices(40, seed=27))
+    market.titles = {i: "Laptop Lenovo Legion 5 R7-5800H RTX 3060 16GB 512GB SSD" for i in market.items}
+    conn, _, _, _ = crawl(make_cfg(), market)
+    sold = sorted(market.items)[0]
+    with conn:
+        conn.execute("UPDATE listings SET state='sold', sold_price=3000 WHERE id=?", (sold,))
+    assert extract.run(conn) == 40
+    assert extract.run(conn) == 0                               # nic nowego - przyrostowo
+    row = conn.execute("SELECT * FROM features WHERE listing_id=?", (sold,)).fetchone()
+    assert row["gpu"] == "rtx 3060" and row["ram_gb"] == 16 and row["storage_gb"] == 512
+    text = "\n".join(extract.report(conn))
+    assert "laptop: 40 ofert" in text and "3000 zł" in text and "rtx 3060" in text
+
+
+def test_extract_vram_vs_ram_and_form_errors():
+    from analyzer.extract import extract
+    f, _ = extract("laptop", "Lenovo LOQ i5-12450HX RTX 3050 6GB 16GB 512GB", "", {})
+    assert f["ram_gb"]["value"] == 16 and f["gpu"]["value"] == "rtx 3050"
+    f, _ = extract("laptop", "MacBook Pro 13 2017", "8 GB RAM, SSD 256 GB",
+                   {"computer_ram": "256 GB", "computer_storage_capacity": "8 GB"})
+    assert f["ram_gb"] == {"value": 8, "source": "description"}
+    assert f["storage_gb"] == {"value": 256, "source": "description"}
+    assert "platform_field_errors" in f
