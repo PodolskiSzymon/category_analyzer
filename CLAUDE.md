@@ -227,8 +227,9 @@ Pełna architektura, schemat bazy, etapy i kryteria ukończenia: **`ARCHITEKTURA
   sprzedanej od aktywnej. **Pomysł (do potwierdzenia):** status z pary zapytań – sidebar 200 → aktywna / zarezerwowana /
   ukryta (stary `item_status`); sidebar 404/104 + `/services` 200 → oferta istnieje, ale sidebar jej nie pokazuje →
   **sprzedana** (myszka); sidebar 404/104 + `/services` 404 → **usunięta**. Do tego `/services` daje cenę w chwili
-  sprawdzenia w zł i w walucie sprzedawcy (cena sprzedaży bez kursowego dryfu). ⚠ Potrzebne przed użyciem:
-  `/services` dla naprawdę usuniętej oferty (404?), dla ukrytej i zarezerwowanej (czy sidebar dla nich też daje 404 –
+  sprawdzenia w zł i w walucie sprzedawcy (cena sprzedaży bez kursowego dryfu). **Potwierdzone (użytkownik
+  2026-10-24): naprawdę usunięta oferta → `/services` = `{"code":104,"message":"Zawartość nieodnaleziona",
+  "message_code":"not_found"}`** (jak sidebar usuniętej). ⚠ Jeszcze potrzebne: `/services` i sidebar dla ukrytej i zarezerwowanej (czy sidebar dla nich też daje 404 –
   wtedy pomyliłyby się ze sprzedanymi), oraz walidacja na próbce: kilkadziesiąt ofert sprawdzonych parą zapytań
   i stroną HTML (`buyer_item_status`) – zgodność > ~98%, inaczej status ze strony HTML.
 * **Następne**: `extract.py` v1 wg `ATRYBUTY.md` (reguły + raport pokrycia na prawdziwych opisach) → AI dla braków.
