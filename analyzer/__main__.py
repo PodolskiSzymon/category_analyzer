@@ -9,6 +9,7 @@
   classify-report / reclassify            klasyfikacja ofert z kategorii mieszanych (bez sieci)
   classify-ai [--limit N]                 RAM + inna kategoria w tytule -> AI ocenia zdjęcie główne (bez proxy)
   recheck [--states deleted] [--limit N]  naprawa: 'deleted' od nowa przez /services + sidebar (sold/deleted/active)
+  html-details [--states sold] [--limit N] opisy sprzedanych ze strony HTML (gdy API ich już nie poda)
   ntfy-test                               testowe powiadomienie na telefon (ntfy)
   check <link|ID> [...]                   czy oferta jest sprzedana (/services + sidebar przez proxy) + co wie baza
   resolve-report                          dlaczego 0 sprzedanych: zapisane odpowiedzi resolvera + próbka do wysłania
@@ -207,6 +208,34 @@ async def cmd_check(cfg, items):
             conn.close()
 
 
+async def cmd_html_details(cfg, states, limit, delay):
+    from . import notify
+    from .html_details import fetch_html_details
+    from .progress import ConsoleBar
+
+    cfg.page_delay = delay
+    bar = ConsoleBar()
+    console = [h for h in logging.getLogger().handlers if type(h) is logging.StreamHandler]
+    for handler in console:
+        handler.addFilter(bar)
+    conn = db.connect(cfg.db_path)
+    session = build_session()
+    try:
+        counts = await fetch_html_details(cfg, session, conn, states, limit, progress=bar)
+        bar.finish()
+        transfer = session.traffic.window_report()[0]
+        log.info("[TRANSFER] %s", transfer)
+        await notify.send(f"Analyzer: html-details skończony ({sum(counts.values())} ofert)",
+                          [", ".join(f"{k} {v}" for k, v in sorted(counts.items())) or "nic do zrobienia",
+                           transfer.split("|")[0].strip()])
+    finally:
+        bar.finish()
+        for handler in console:
+            handler.removeFilter(bar)
+        await session.close()
+        conn.close()
+
+
 async def cmd_details(cfg, limit):
     from .details import fetch_details
 
@@ -354,6 +383,11 @@ def main(argv=None):
                            help="bez sprawdzania - tylko linki z dotychczasowych wyników recheck (--show)")
     p_recheck.add_argument("--pauses", action="store_true",
                            help="„ludzkie” przerwy: co ~pół godziny 10-120 s i 8 h odpoczynku po 12 h (domyślnie bez)")
+    p_html = sub.add_parser("html-details", help="opisy i atrybuty ze strony oferty (HTML, ~35 KB/ofertę) dla ofert "
+                                                "bez szczegółów - domyślnie sprzedanych")
+    p_html.add_argument("--states", default="sold", help="stany ofert, po przecinku (domyślnie sold)")
+    p_html.add_argument("--limit", type=int, default=None)
+    p_html.add_argument("--delay", default="0.6-1.5", help="odstęp między ofertami w s (domyślnie 0.6-1.5)")
     sub.add_parser("ntfy-test", help="testowe powiadomienie na telefon (temat z ANALYZER_NTFY_TOPIC / SNIPER_NTFY_TOPIC)")
     p_check = sub.add_parser("check", help="czy oferta jest sprzedana: link(i) albo ID - jedno zapytanie na ofertę")
     p_check.add_argument("items", nargs="+", help="link https://www.vinted.pl/items/... albo samo ID")
@@ -412,6 +446,10 @@ def main(argv=None):
             conn.close()
             return
         asyncio.run(cmd_recheck(cfg, states, args.limit, args.again, human=args.pauses, delay=delay, show=show))
+    elif args.command == "html-details":
+        from .config import parse_range
+        states = tuple(x.strip() for x in args.states.split(",") if x.strip())
+        asyncio.run(cmd_html_details(cfg, states, args.limit, parse_range(args.delay, (0.6, 1.5))))
     elif args.command == "ntfy-test":
         from . import notify
         ok = asyncio.run(notify.send("Analyzer: test powiadomienia", ["Tak będzie wyglądać powiadomienie o końcu "

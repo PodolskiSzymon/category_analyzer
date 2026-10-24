@@ -1,3 +1,4 @@
+from pathlib import Path
 import asyncio
 import json
 
@@ -1219,3 +1220,58 @@ def test_ntfy_notification(monkeypatch):
     url, body = sent[0]
     assert url.startswith("https://ntfy.example") and body["topic"] == "test-temat"
     assert body["title"] == "Analyzer: recheck skończony" and "sold 5" in body["message"]
+
+
+# ------------------------------------------------------------------ html_details (strona oferty)
+
+HTML_FIXTURES = json.loads((Path(__file__).parent / "fixtures_html.json").read_text(encoding="utf-8"))
+
+
+def test_parse_sidebar_html_real_pages():
+    from analyzer.html_details import parse_sidebar_html
+    sold = parse_sidebar_html("<html>" + HTML_FIXTURES["sold_mouse"])
+    assert sold["sold"] and sold["status"] == "Sprzedane" and sold["price"] == 45.78
+    assert sold["attributes"] == {"status": "Bardzo dobry", "color": "Czarny", "upload_date": "4 mies."}
+    assert sold["description"].startswith("Very good condition") and "Tested and working" in sold["description"]
+    active = parse_sidebar_html("<html>" + HTML_FIXTURES["active_macbook"])
+    assert not active["sold"] and active["status"] is None and active["price"] == 1369.57
+    assert active["attributes"]["computer_ram"] == "8 GB" and active["attributes"]["model_nav"] == "MacBook Pro 2019"
+    assert "Intel Iris Plus Graphics 645" in active["description"]
+    assert parse_sidebar_html("<html><h1>Page not found</h1></html>") is None
+
+
+def test_html_details_flow_stops_early_and_stores():
+    from analyzer.html_details import fetch_html_details
+
+    market = FakeMarket(market_prices(30, seed=26))
+    conn, _, _, _ = crawl(make_cfg(), market)
+    sold_id, gone_id = sorted(market.items)[:2]
+    with conn:
+        conn.execute("UPDATE listings SET state='sold', created_at=NULL WHERE id IN (?, ?)", (sold_id, gone_id))
+    tail = 'data-testid="item-shipping-banner"><div data-testid="profile-username">sprzedawca_xyz</div>' + "x" * 500_000
+    page = "<html><head>" + "y" * 300_000 + "</head><body>" + HTML_FIXTURES["sold_mouse"] + tail
+    requested = []
+
+    def handler(request):
+        requested.append(request)
+        if str(sold_id) in request.url.path:
+            return httpx.Response(200, html=page)
+        return httpx.Response(404, html="<html>Page not found</html>")
+
+    async def go():
+        session = await _mock_session(handler)
+        try:
+            return await fetch_html_details(make_cfg(), session, conn, sleep=no_sleep)
+        finally:
+            await session.client.aclose()
+
+    counts = asyncio.run(go())
+    assert counts == {"ok": 1, "brak strony (HTTP 404)": 1}
+    d = conn.execute("SELECT * FROM details WHERE listing_id=?", (sold_id,)).fetchone()
+    assert d["source"] == "html" and d["upload_age"] == "4 mies." and "Tested and working" in d["description"]
+    row = conn.execute("SELECT * FROM listings WHERE id=?", (sold_id,)).fetchone()
+    assert row["details_at"] and row["created_at"] and row["days_to_sell"] is not None
+    assert "sprzedawca_xyz" not in json.dumps([v for _, v in db.get_raw(conn, sold_id, "html_sidebar")])
+    headers = requested[0].headers
+    assert headers["accept"].startswith("text/html") and "x-next-app" not in headers
+    assert requested[0].url.path == f"/items/{sold_id}"

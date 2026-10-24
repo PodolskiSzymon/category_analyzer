@@ -73,8 +73,8 @@ def store_details(conn, listing_id, body, fetched_at):
     conversion = sidebar.get("conversion") if isinstance(sidebar.get("conversion"), dict) else {}
     conn.execute(
         """INSERT OR REPLACE INTO details (listing_id, fetched_at, description, attributes_json, upload_age,
-               created_est, business, seller_currency, photo_count, is_localized)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               created_est, business, seller_currency, photo_count, is_localized, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sidebar')""",
         (listing_id, fetched_at, description, json.dumps(attrs, ensure_ascii=False), attrs.get("upload_date"),
          created, None if sidebar.get("business") is None else int(bool(sidebar.get("business"))),
          conversion.get("seller_currency") or sidebar.get("currency"), len(sidebar.get("photos") or []),

@@ -174,7 +174,15 @@ ALTER TABLE listings ADD COLUMN seller_price REAL;
 ALTER TABLE listings ADD COLUMN seller_currency TEXT;
 """
 
-MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9]
+# v10 (2026-10-24): skąd szczegóły - 'sidebar' (API, póki oferta aktywna) albo 'html' (strona oferty - sprzedane,
+# których API już nie poda; html_details.py).
+SCHEMA_V10 = """
+ALTER TABLE details ADD COLUMN source TEXT;
+UPDATE details SET source = 'sidebar';
+"""
+
+MIGRATIONS = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9,
+              SCHEMA_V10]
 
 
 def utcnow():
